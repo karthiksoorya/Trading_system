@@ -1,0 +1,174 @@
+TRADING SYSTEM — HELP & SETUP GUIDE
+=====================================
+Last Updated: April 2026
+
+
+════════════════════════════════════════
+ SECTION 1 — FIRST TIME SETUP
+════════════════════════════════════════
+
+STEP 1 — INSTALL PYTHON PACKAGES
+----------------------------------
+Open terminal in the trading_system folder and run:
+
+    pip install kiteconnect schedule pandas python-dotenv
+
+
+STEP 2 — CREATE A KITE CONNECT APP
+-------------------------------------
+1. Go to https://developers.kite.trade
+2. Log in with your Zerodha credentials
+3. Click "Create new app"
+4. Fill in the form:
+     App name     : TradingSystem (or any name)
+     App type     : Connect
+     Redirect URL : http://127.0.0.1/    (use exactly this)
+     Description  : Personal trading automation
+5. Click Submit
+
+
+STEP 3 — ADD YOUR API CREDENTIALS
+------------------------------------
+1. On the developer console, open your app
+2. Copy the API Key and API Secret
+3. Open the .env file in the project root folder
+4. Fill in:
+     KITE_API_KEY=paste_your_api_key_here
+     KITE_API_SECRET=paste_your_api_secret_here
+5. Save the file
+
+
+════════════════════════════════════════
+ SECTION 2 — DAILY ROUTINE
+════════════════════════════════════════
+
+Every trading day, follow these steps in order:
+
+
+STEP 1 — GENERATE TODAY'S TOKEN (8:30–9:00 AM)
+-------------------------------------------------
+Kite issues a fresh access token every day. Run:
+
+    python main.py --token
+
+What happens:
+  → A login URL is printed in the terminal
+  → Open that URL in your browser
+  → Log in with your Zerodha credentials
+  → Browser redirects to a URL like:
+        http://127.0.0.1/?request_token=XXXXXXXX&status=success
+  → Copy the XXXXXXXX part only (the request_token)
+  → Paste it into the terminal when prompted
+  → Done — token is saved to .kite_token file, valid till midnight
+
+
+STEP 2 — START THE ENGINE (any time before 10:05 AM)
+------------------------------------------------------
+    python main.py
+
+What happens:
+  → Engine connects to Kite
+  → Waits until 10:05 AM
+  → At 10:05 AM, scans Nifty 50 across 3 timeframes (60m, 15m, 5m)
+  → Detects demand/supply zones using DBR / RBR / RBD / DBD patterns
+  → Scores each zone using the Booster system (Freshness + Strength + Time + R:R)
+  → If score >= 8, logs the signal to database and prints it in terminal
+  → Re-scans every 5 minutes until 3:30 PM
+  → At 3:30 PM, exports all signals to CSV and shuts down
+
+
+SAMPLE TERMINAL OUTPUT
+------------------------
+10:05:00  INFO      ── Scanning NSE:NIFTY 50 ──
+10:05:01  INFO      LTP: 22345.60
+10:05:02  INFO      [60minute] SIGNAL #1 | DEMAND DBR | Score 9.0 | Entry 22100.00 | SL 21900.00 | TGT 22500.00
+10:05:03  INFO      [15minute] SIGNAL #2 | SUPPLY RBD | Score 8.5 | Entry 22400.00 | SL 22600.00 | TGT 22000.00
+15:30:00  INFO      End of day export complete → data/exports/trades_2026-04-27.csv
+
+
+════════════════════════════════════════
+ SECTION 3 — OTHER COMMANDS
+════════════════════════════════════════
+
+CHECK TODAY'S STATUS (run anytime during the day)
+--------------------------------------------------
+    python main.py --status
+
+Output:
+    Trades today : 2
+    Daily P&L    : 45.50 pts
+
+
+EXPORT TODAY'S TRADES TO CSV (manual export)
+---------------------------------------------
+    python main.py --export
+
+Output file saved to:
+    trading_system/data/exports/trades_YYYY-MM-DD.csv
+
+Open the CSV in Excel or Google Sheets to review signals.
+
+
+════════════════════════════════════════
+ SECTION 4 — WHERE IS MY DATA?
+════════════════════════════════════════
+
+Database (SQLite)  : trading_system/data/trades.db
+CSV exports        : trading_system/data/exports/
+Daily token file   : trading_system/.kite_token
+API credentials    : trading_system/.env
+
+
+════════════════════════════════════════
+ SECTION 5 — TROUBLESHOOTING
+════════════════════════════════════════
+
+ERROR: api_key should be minimum 6 characters
+→ .env file is missing or credentials are blank
+→ Fix: open .env and add your real KITE_API_KEY and KITE_API_SECRET
+
+ERROR: No valid token found
+→ Daily token has not been generated yet or it expired (midnight reset)
+→ Fix: run  python main.py --token
+
+ERROR: Broker not connected
+→ Token is missing or invalid
+→ Fix: run  python main.py --token  and try again
+
+ERROR: ModuleNotFoundError: kiteconnect
+→ Packages not installed
+→ Fix: pip install kiteconnect schedule pandas python-dotenv
+
+SIGNAL: No signals printed at 10:05 AM
+→ Normal — zones are only logged when Booster score >= 8
+→ The scanner ran but no qualifying zones were found today
+→ Check terminal for "Scanning" message to confirm it ran
+
+ENGINE STOPS UNEXPECTEDLY
+→ Check if laptop went to sleep — keep power settings to "never sleep" on market days
+→ Rerun: python main.py  (it will resume scanning on next 5-min tick)
+
+
+════════════════════════════════════════
+ SECTION 6 — API PRICING & KEYS
+════════════════════════════════════════
+
+Kite Connect API  : ₹500/month (real-time + historical data)
+Order placement   : Free since March 2025
+Developer console : https://developers.kite.trade
+
+REGENERATING KEYS (if compromised or forgotten)
+------------------------------------------------
+1. Go to https://developers.kite.trade → your app
+2. Click "Regenerate API Secret" for a new secret
+3. To get a new API Key: delete the app and create a new one
+4. Update .env with the new values immediately
+
+
+WARNING
+--------
+- Keep .env private — it contains your API credentials
+- Do NOT commit .env to GitHub
+- Do NOT paste keys in chat, email, or documents
+- This project is inside OneDrive — .env is syncing to cloud
+  Recommended: move project folder outside OneDrive
