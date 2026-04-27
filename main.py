@@ -1,16 +1,60 @@
 """
-Entry point.
+Nifty Options Trading Engine — Entry Point
 
-Usage:
-  python main.py            → start the trading engine (paper mode by default)
-  python main.py --token    → generate today's Kite access token
-  python main.py --export   → export today's trades to CSV and exit
-  python main.py --status   → print today's trade count and P&L and exit
+Run:  python main.py          → interactive menu
+      python main.py --token  → generate today's Kite token (for scripts/VPS)
+      python main.py --run    → start engine directly (for scripts/VPS)
+      python main.py --scan   → one-time test scan, bypass market hours
+      python main.py --status → print today's P&L and exit
+      python main.py --export → export today's CSV and exit
 """
 
 import argparse
 import sys
 
+
+# ── Menu ──────────────────────────────────────────────────────────────────
+
+def show_menu():
+    import config
+    from journal.db import init_db, trades_today, daily_pnl
+    init_db()
+
+    while True:
+        print()
+        print("=" * 48)
+        print(f"   NIFTY TRADING SYSTEM  |  mode: {config.MODE.upper()}")
+        print("=" * 48)
+        print(f"   Today  →  trades: {trades_today()}  |  P&L: {daily_pnl():.2f} pts")
+        print("-" * 48)
+        print("   1.  Generate today's Kite token")
+        print("   2.  Start engine  (waits for 10:05 AM)")
+        print("   3.  Scan now      (test — bypass time check)")
+        print("   4.  Today's status")
+        print("   5.  Export today's CSV")
+        print("   6.  Exit")
+        print("=" * 48)
+
+        choice = input("   Choose [1-6]: ").strip()
+
+        if choice == "1":
+            cmd_token()
+        elif choice == "2":
+            cmd_run()
+        elif choice == "3":
+            cmd_scan_now()
+        elif choice == "4":
+            cmd_status()
+        elif choice == "5":
+            cmd_export()
+        elif choice == "6":
+            print("   Bye.")
+            sys.exit(0)
+        else:
+            print("   Invalid choice. Enter 1–6.")
+
+
+# ── Commands ──────────────────────────────────────────────────────────────
 
 def cmd_token():
     import config
@@ -18,39 +62,22 @@ def cmd_token():
     k = KiteAdapter()
 
     if config.KITE_TOKEN_MODE == "auto":
-        # Option B — VPS: browser redirects back to this machine automatically
-        print("\nOpen this URL in your browser (phone or laptop):")
-        print(k.generate_login_url())
-        print(f"\nWaiting for Kite to redirect to this machine on port {config.KITE_TOKEN_PORT}...")
+        print("\n   Open this URL in your browser (phone or laptop):")
+        print(f"   {k.generate_login_url()}")
+        print(f"\n   Waiting for Kite redirect on port {config.KITE_TOKEN_PORT}...")
         k.capture_token_via_server(port=config.KITE_TOKEN_PORT)
-        print("Access token captured and saved automatically.")
+        print("   Token captured and saved automatically.")
     else:
-        # Option A — laptop: manually copy-paste the request_token
-        print("\nStep 1 — Open this URL in your browser:")
-        print(k.generate_login_url())
-        print("\nStep 2 — After login, copy the request_token from the redirect URL.")
-        print("  Redirect looks like: http://127.0.0.1/?request_token=XXXXXX&status=success")
-        request_token = input("\nPaste request_token here: ").strip()
+        print("\n   Step 1 — Open this URL in your browser:")
+        print(f"   {k.generate_login_url()}")
+        print("\n   Step 2 — After login, copy the request_token from the redirect URL.")
+        print("   Redirect looks like: http://127.0.0.1/?request_token=XXXXXX&status=success")
+        request_token = input("\n   Paste request_token here: ").strip()
         if not request_token:
-            print("No token entered. Exiting.")
-            sys.exit(1)
+            print("   No token entered.")
+            return
         k.generate_session(request_token)
-        print("Access token saved. You can now run: python main.py")
-
-
-def cmd_export():
-    from journal.db import init_db
-    from journal.export import export_day
-    init_db()
-    path = export_day()
-    print(f"Exported → {path}")
-
-
-def cmd_status():
-    from journal.db import init_db, trades_today, daily_pnl
-    init_db()
-    print(f"Trades today : {trades_today()}")
-    print(f"Daily P&L    : {daily_pnl():.2f} pts")
+        print("   Token saved. Engine is ready to run.")
 
 
 def cmd_run():
@@ -58,18 +85,44 @@ def cmd_run():
     run()
 
 
+def cmd_scan_now():
+    from scheduler import scan_now
+    scan_now()
+    print("\n   Scan complete. Check above for any signals found.")
+
+
+def cmd_status():
+    from journal.db import init_db, trades_today, daily_pnl
+    init_db()
+    print(f"\n   Trades today : {trades_today()}")
+    print(f"   Daily P&L    : {daily_pnl():.2f} pts")
+
+
+def cmd_export():
+    from journal.db import init_db
+    from journal.export import export_day
+    init_db()
+    path = export_day()
+    print(f"\n   Exported → {path}")
+
+
+# ── Entrypoint ────────────────────────────────────────────────────────────
+
 def main():
-    parser = argparse.ArgumentParser(description="Nifty Options Trading Engine")
-    group = parser.add_mutually_exclusive_group()
-    group.add_argument("--token",  action="store_true", help="Generate today's Kite token")
-    group.add_argument("--export", action="store_true", help="Export today's CSV and exit")
-    group.add_argument("--status", action="store_true", help="Print today's P&L and exit")
+    parser = argparse.ArgumentParser(add_help=False)
+    parser.add_argument("--token",  action="store_true")
+    parser.add_argument("--run",    action="store_true")
+    parser.add_argument("--scan",   action="store_true")
+    parser.add_argument("--status", action="store_true")
+    parser.add_argument("--export", action="store_true")
     args = parser.parse_args()
 
-    if args.token:   cmd_token()
-    elif args.export: cmd_export()
+    if   args.token:  cmd_token()
+    elif args.run:    cmd_run()
+    elif args.scan:   cmd_scan_now()
     elif args.status: cmd_status()
-    else:            cmd_run()
+    elif args.export: cmd_export()
+    else:             show_menu()   # default — interactive menu
 
 
 if __name__ == "__main__":

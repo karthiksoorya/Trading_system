@@ -41,9 +41,23 @@ def scan():
     if not _within_market_hours():
         logger.info("Outside market hours — skipping scan.")
         return
+    _scan_core()
 
+
+def scan_now():
+    """Run a single scan immediately — bypasses market hours check. For testing."""
+    init_db()
+    if not broker.is_connected():
+        logger.error("Broker not connected. Run token refresh first.")
+        return
+    logger.info("── TEST SCAN (bypassing market hours) ──")
+    scan.__wrapped__() if hasattr(scan, "__wrapped__") else _scan_core()
+
+
+def _scan_core():
+    """Inner scan logic shared by scan() and scan_now()."""
     if trades_today() >= config.MAX_TRADES_PER_DAY:
-        logger.info("Max trades reached for today (%d). Scan skipped.", config.MAX_TRADES_PER_DAY)
+        logger.info("Max trades reached for today (%d).", config.MAX_TRADES_PER_DAY)
         return
 
     pnl = daily_pnl()
@@ -51,7 +65,7 @@ def scan():
         logger.warning("Daily loss limit hit (%.2f). No more trades today.", pnl)
         return
 
-    logger.info("── Scanning %s ──", config.NIFTY_SYMBOL)
+    logger.info("Scanning %s ...", config.NIFTY_SYMBOL)
     ltp = broker.get_ltp(config.NIFTY_SYMBOL)
     logger.info("LTP: %.2f", ltp)
 
@@ -61,8 +75,8 @@ def scan():
             logger.warning("Not enough candles on %s", tf)
             continue
 
-        zones = detect_zones(candles[:-1], tf)   # exclude live candle
-        live_candles = candles[-20:]              # recent slice for state update
+        zones = detect_zones(candles[:-1], tf)
+        live_candles = candles[-20:]
 
         for zone in zones:
             update_zone_state(zone, live_candles)
@@ -73,11 +87,7 @@ def scan():
             if sizing.get("error"):
                 continue
 
-            signal = generate_signal(
-                zone=zone,
-                ltp=ltp,
-                prev_candles=candles[-10:],
-            )
+            signal = generate_signal(zone=zone, ltp=ltp, prev_candles=candles[-10:])
             if signal is None:
                 continue
 
