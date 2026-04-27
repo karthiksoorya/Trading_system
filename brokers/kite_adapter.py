@@ -1,6 +1,9 @@
 import json
 import logging
+import threading
 from datetime import datetime, timedelta
+from http.server import BaseHTTPRequestHandler, HTTPServer
+from urllib.parse import parse_qs, urlparse
 
 from kiteconnect import KiteConnect
 
@@ -53,6 +56,49 @@ class KiteAdapter(BrokerBase):
     def generate_login_url(self) -> str:
         """Step 1 of daily auth: open this URL in browser to get request_token."""
         return self._kite.login_url()
+
+    def capture_token_via_server(self, port: int = 5000, timeout: int = 180) -> str:
+        """
+        Option B — VPS auto token capture.
+        Disabled by default (KITE_TOKEN_MODE = "manual" in config).
+
+        Starts a local HTTP server, waits for Kite to redirect back with
+        the request_token in the URL, captures it automatically.
+
+        To enable:
+          1. Set KITE_TOKEN_MODE = "auto" in config.py
+          2. Update redirect URL in Kite developer console to:
+                http://YOUR_VPS_IP:5000/
+          3. Open firewall port 5000 on the VPS
+
+        Returns the access_token after completing the session.
+        """
+        captured = {}
+
+        class _Handler(BaseHTTPRequestHandler):
+            def do_GET(self):
+                params = parse_qs(urlparse(self.path).query)
+                if "request_token" in params:
+                    captured["request_token"] = params["request_token"][0]
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html")
+                self.end_headers()
+                self.wfile.write(b"<h2>Token captured. You can close this tab.</h2>")
+                threading.Thread(target=self.server.shutdown, daemon=True).start()
+
+            def log_message(self, *args):
+                pass  # suppress HTTP server logs
+
+        server = HTTPServer(("0.0.0.0", port), _Handler)
+        server.timeout = timeout
+        logger.info("Waiting for Kite redirect on port %d (timeout: %ds)...", port, timeout)
+        server.serve_forever()
+
+        request_token = captured.get("request_token", "")
+        if not request_token:
+            raise TimeoutError("No request_token received within timeout window.")
+
+        return self.generate_session(request_token)
 
     def generate_session(self, request_token: str) -> str:
         """Step 2 of daily auth: exchange request_token for access_token."""

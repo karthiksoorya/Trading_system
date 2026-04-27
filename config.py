@@ -47,6 +47,16 @@ EXCITING_CANDLE_BODY_RATIO = 0.50   # body > 50% of range → exciting
 KITE_API_KEY    = os.getenv("KITE_API_KEY", "")
 KITE_API_SECRET = os.getenv("KITE_API_SECRET", "")
 
+# ── Token Mode ─────────────────────────────────────────────────────────────
+# "manual" → Option A: print URL, paste request_token in terminal (laptop)
+# "auto"   → Option B: VPS captures token via HTTP redirect automatically
+#   To switch to auto:
+#     1. Change to KITE_TOKEN_MODE = "auto"
+#     2. Update Kite app redirect URL to http://YOUR_VPS_IP:5000/
+#     3. Open port 5000 on VPS firewall
+KITE_TOKEN_MODE = "manual"
+KITE_TOKEN_PORT = 5000
+
 # ── Computed ───────────────────────────────────────────────────────────────
 MAX_DAILY_LOSS   = CAPITAL * MAX_RISK_PCT          # ₹100
 RISK_PER_TRADE   = MAX_DAILY_LOSS / MAX_TRADES_PER_DAY  # ₹25

@@ -13,17 +13,29 @@ import sys
 
 
 def cmd_token():
+    import config
     from brokers.kite_adapter import KiteAdapter
     k = KiteAdapter()
-    print("\nStep 1 — Open this URL in your browser:")
-    print(k.generate_login_url())
-    print("\nStep 2 — After login, copy the 'request_token' from the redirect URL.")
-    request_token = input("Paste request_token here: ").strip()
-    if not request_token:
-        print("No token entered. Exiting.")
-        sys.exit(1)
-    k.generate_session(request_token)
-    print("Access token saved. You can now run: python main.py")
+
+    if config.KITE_TOKEN_MODE == "auto":
+        # Option B — VPS: browser redirects back to this machine automatically
+        print("\nOpen this URL in your browser (phone or laptop):")
+        print(k.generate_login_url())
+        print(f"\nWaiting for Kite to redirect to this machine on port {config.KITE_TOKEN_PORT}...")
+        k.capture_token_via_server(port=config.KITE_TOKEN_PORT)
+        print("Access token captured and saved automatically.")
+    else:
+        # Option A — laptop: manually copy-paste the request_token
+        print("\nStep 1 — Open this URL in your browser:")
+        print(k.generate_login_url())
+        print("\nStep 2 — After login, copy the request_token from the redirect URL.")
+        print("  Redirect looks like: http://127.0.0.1/?request_token=XXXXXX&status=success")
+        request_token = input("\nPaste request_token here: ").strip()
+        if not request_token:
+            print("No token entered. Exiting.")
+            sys.exit(1)
+        k.generate_session(request_token)
+        print("Access token saved. You can now run: python main.py")
 
 
 def cmd_export():
