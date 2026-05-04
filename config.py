@@ -13,7 +13,8 @@ BASE_DIR  = Path(__file__).parent
 DATA_DIR  = BASE_DIR / "data"
 DB_PATH   = DATA_DIR / "trades.db"
 CSV_DIR   = DATA_DIR / "exports"
-TOKEN_FILE = BASE_DIR / ".kite_token"  # ignored by git
+TOKEN_FILE      = BASE_DIR / ".kite_token"   # ignored by git
+ENGINE_PID_FILE = BASE_DIR / ".engine.pid"  # ignored by git
 
 # ── Broker & Mode ──────────────────────────────────────────────────────────
 BROKER = "kite"    # "kite" | "upstox"
