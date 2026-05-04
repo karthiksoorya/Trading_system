@@ -30,8 +30,10 @@ CREATE TABLE IF NOT EXISTS signals (
     strength        REAL NOT NULL,
     time_score      REAL NOT NULL,
     rr_score        REAL NOT NULL,
-    entry_type      INTEGER NOT NULL,
-    position_size   REAL NOT NULL,
+    entry_type        INTEGER NOT NULL,
+    position_size     REAL NOT NULL,
+    confluence_count  INTEGER DEFAULT 1,  -- number of TFs in agreement
+    confluence_tfs    TEXT,               -- e.g. "5minute + 15minute + 60minute"
     -- filled after trade closes
     exit_time       TEXT,
     exit_price      REAL,
@@ -80,7 +82,21 @@ def init_db():
     with _conn() as con:
         con.execute(_CREATE_SIGNALS)
         con.execute(_CREATE_DAILY)
+        _migrate(con)
     logger.info("Database initialised at %s", config.DB_PATH)
+
+
+def _migrate(con):
+    """Add new columns to existing DB without breaking old data."""
+    existing = {row[1] for row in con.execute("PRAGMA table_info(signals)")}
+    migrations = [
+        ("confluence_count", "INTEGER DEFAULT 1"),
+        ("confluence_tfs",   "TEXT"),
+    ]
+    for col, definition in migrations:
+        if col not in existing:
+            con.execute(f"ALTER TABLE signals ADD COLUMN {col} {definition}")
+            logger.info("DB migration: added column %s", col)
 
 
 # ── Write ─────────────────────────────────────────────────────────────────
@@ -96,13 +112,17 @@ def log_signal(signal_data: dict) -> int:
                 proximal, distal, entry, stop_loss,
                 intraday_target, overnight_target,
                 booster_score, freshness, strength, time_score, rr_score,
-                entry_type, position_size, mode
+                entry_type, position_size,
+                confluence_count, confluence_tfs,
+                mode
             ) VALUES (
                 :date, :time_signal, :zone_type, :zone_class, :timeframe,
                 :proximal, :distal, :entry, :stop_loss,
                 :intraday_target, :overnight_target,
                 :total, :freshness, :strength, :time_score, :rr_score,
-                :entry_type, :position_size, :mode
+                :entry_type, :position_size,
+                :confluence_count, :confluence_tfs,
+                :mode
             )
             """,
             {

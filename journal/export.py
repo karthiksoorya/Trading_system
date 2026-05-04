@@ -16,6 +16,7 @@ _COLUMNS = [
     "intraday_target", "overnight_target",
     "booster_score", "freshness", "strength", "time_score", "rr_score",
     "entry_type", "position_size",
+    "confluence_count", "confluence_tfs",
     "exit_time", "exit_price", "exit_reason",
     "pnl_points", "result", "rule_based", "notes", "mode",
 ]
