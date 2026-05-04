@@ -54,6 +54,17 @@ def show_menu():
             print("   Invalid choice. Enter 1–6.")
 
 
+# ── Helpers ───────────────────────────────────────────────────────────────
+
+def _extract_request_token(raw: str) -> str:
+    """Accept full redirect URL or bare token — always return just the token."""
+    from urllib.parse import urlparse, parse_qs
+    if raw.startswith("http"):
+        params = parse_qs(urlparse(raw).query)
+        return params.get("request_token", [""])[0]
+    return raw  # already a bare token
+
+
 # ── Commands ──────────────────────────────────────────────────────────────
 
 def cmd_token():
@@ -70,11 +81,15 @@ def cmd_token():
     else:
         print("\n   Step 1 — Open this URL in your browser:")
         print(f"   {k.generate_login_url()}")
-        print("\n   Step 2 — After login, copy the request_token from the redirect URL.")
-        print("   Redirect looks like: http://127.0.0.1/?request_token=XXXXXX&status=success")
-        request_token = input("\n   Paste request_token here: ").strip()
+        print("\n   Step 2 — After login, copy the full URL from the browser address bar.")
+        print("   It looks like: http://127.0.0.1/?request_token=XXXXXX&status=success")
+        raw = input("\n   Paste full URL (or just the token): ").strip()
+        if not raw:
+            print("   Nothing entered.")
+            return
+        request_token = _extract_request_token(raw)
         if not request_token:
-            print("   No token entered.")
+            print("   Could not find request_token in what you pasted.")
             return
         k.generate_session(request_token)
         print("   Token saved. Engine is ready to run.")
