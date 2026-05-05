@@ -21,6 +21,7 @@ import streamlit as st
 import config
 from journal.db import init_db, close_trade, trades_today, daily_pnl, get_signals_for_date
 from journal.export import export_day
+from scheduler import is_market_open, get_last_trading_day
 
 # ── Page setup ────────────────────────────────────────────────────────────
 st.set_page_config(
@@ -162,11 +163,18 @@ def _engine_panel():
         use_container_width=True,
         help="One-time scan — bypasses market hours. Good for testing.",
     ):
+        from scheduler import scan_now
         def _run():
-            from scheduler import scan_now
             scan_now()
         threading.Thread(target=_run, daemon=True).start()
-        st.toast("Scan started — check Signals tab in ~10 seconds.", icon="⚡")
+        if is_market_open():
+            st.toast("Scan started — check Signals tab in ~10 seconds.", icon="⚡")
+        else:
+            st.toast(
+                f"Market is closed. Scanning last trading day ({get_last_trading_day()}) "
+                "data for testing — results may not reflect live conditions.",
+                icon="⚠️",
+            )
 
 
 # ── Tabs ──────────────────────────────────────────────────────────────────
@@ -256,7 +264,7 @@ with tab_signals:
         df = pd.DataFrame([dict(r) for r in rows])
 
         display_cols = [
-            "id", "time_signal", "zone_type", "zone_class", "timeframe",
+            "id", "date", "time_signal", "zone_type", "zone_class", "timeframe",
             "entry", "stop_loss", "intraday_target",
             "booster_score", "confluence_count", "confluence_tfs",
             "entry_type", "position_size",

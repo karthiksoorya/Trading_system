@@ -14,7 +14,7 @@ Multi-timeframe confluence flow:
 
 import logging
 import time
-from datetime import datetime
+from datetime import date, datetime, timedelta
 
 import schedule
 
@@ -40,13 +40,31 @@ broker = get_broker()
 _TF_ORDER = [config.TF_LOWER, config.TF_INTERMEDIATE, config.TF_HIGHER]
 
 
+def get_last_trading_day() -> date:
+    """Return today if it's a weekday, otherwise roll back to last Friday."""
+    today = date.today()
+    # weekday(): Mon=0 … Sun=6
+    if today.weekday() == 5:      # Saturday → Friday
+        return today - timedelta(days=1)
+    if today.weekday() == 6:      # Sunday → Friday
+        return today - timedelta(days=2)
+    return today
+
+
+def is_market_open() -> bool:
+    now = datetime.now()
+    if now.weekday() >= 5:        # Saturday or Sunday
+        return False
+    t = now.strftime("%H:%M")
+    return config.MARKET_OPEN <= t <= config.MARKET_CLOSE
+
+
 def _within_market_hours() -> bool:
-    now = datetime.now().strftime("%H:%M")
-    return config.MARKET_OPEN <= now <= config.MARKET_CLOSE
+    return is_market_open()
 
 
 def scan():
-    if not _within_market_hours():
+    if not is_market_open():
         logger.info("Outside market hours — skipping scan.")
         return
     _scan_core()
@@ -58,11 +76,20 @@ def scan_now():
     if not broker.is_connected():
         logger.error("Broker not connected. Run token refresh first.")
         return
-    logger.info("── TEST SCAN (bypassing market hours) ──")
+    if not is_market_open():
+        logger.warning(
+            "Market is CLOSED (last trading day: %s). "
+            "Scanning with recent historical data — results are for testing only.",
+            get_last_trading_day(),
+        )
+    else:
+        logger.info("── TEST SCAN ──")
     _scan_core()
 
 
 def _scan_core():
+    trade_date = get_last_trading_day().isoformat()  # last trading day when closed, today when open
+
     if trades_today() >= config.MAX_TRADES_PER_DAY:
         logger.info("Max trades reached for today (%d).", config.MAX_TRADES_PER_DAY)
         return
@@ -128,7 +155,7 @@ def _scan_core():
             if signal is None:
                 continue
 
-            data = {**signal.as_dict(), "position_size": sizing["position_size"]}
+            data = {**signal.as_dict(), "position_size": sizing["position_size"], "date": trade_date}
             sig_id = log_signal(data)
             logger.info(
                 "[%s] SIGNAL #%d | %s %s | Score %.1f | Confluence %d TF (%s) | "
