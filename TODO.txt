@@ -1,4 +1,7 @@
 Pending Items todo
-1. VPS - Run automatically.
-2. Check the Timings 10:05
-3. Trading Journal - Store separate daily csv with datetime stamp
+* VPS - Run automatically. (Notes are in chat)
+* Check the Timings 10:05
+* Trading Journal - Store separate daily csv with datetime stamp
+* Login Automation (Not Primary)
+* Automated from Mobile
+* Refresh the Streamlit
