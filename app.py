@@ -22,10 +22,19 @@ import config
 from journal.db import (
     init_db, close_trade, trades_today, daily_pnl,
     get_signals_for_date, get_pending_signals, pending_count,
-    approve_signal, reject_signal, reject_all_pending,
+    approve_signal, reject_signal, reject_all_pending, get_open_trades,
 )
 from journal.export import export_day
 from scheduler import is_market_open, get_last_trading_day
+
+
+def _get_ltp() -> float | None:
+    """Fetch live Nifty LTP. Returns None if broker not connected."""
+    try:
+        from brokers.kite_adapter import KiteAdapter
+        return KiteAdapter().get_ltp(config.NIFTY_SYMBOL)
+    except Exception:
+        return None
 
 # ── Page setup ────────────────────────────────────────────────────────────
 st.set_page_config(
@@ -282,6 +291,48 @@ with tab_engine:
 # TAB 2 — APPROVALS
 # ══════════════════════════════════════════════════════════════════════════
 with tab_approvals:
+
+    # ── Open Trades — Live P&L ────────────────────────────────────────────
+    open_trades = get_open_trades()
+    if open_trades:
+        st.subheader("📊 Open Trades — Live P&L")
+        ltp = _get_ltp()
+
+        for row in open_trades:
+            t = dict(row)
+            entry      = t["entry"]
+            sl         = t["stop_loss"]
+            target     = t["intraday_target"]
+            zone_class = t["zone_class"]
+
+            if ltp is not None:
+                unreal = (ltp - entry) if zone_class == "demand" else (entry - ltp)
+                to_target = abs(target - ltp)
+                to_sl     = abs(ltp - sl)
+                pnl_color = "🟢" if unreal >= 0 else "🔴"
+            else:
+                unreal = to_target = to_sl = None
+
+            zone_label = f"🟢 DEMAND {t['zone_type']}" if zone_class == "demand" else f"🔴 SUPPLY {t['zone_type']}"
+            with st.container(border=True):
+                st.markdown(f"**#{t['id']} — {zone_label} | {t['timeframe']}**")
+                c1, c2, c3, c4, c5 = st.columns(5)
+                c1.metric("Entry",  f"{entry:.2f}")
+                c2.metric("LTP",    f"{ltp:.2f}" if ltp else "—")
+                c3.metric(
+                    "Unrealized P&L",
+                    f"{unreal:+.2f} pts" if unreal is not None else "—",
+                    delta=f"{unreal:+.2f}" if unreal is not None else None,
+                )
+                c4.metric("To Target", f"{to_target:.1f} pts" if to_target is not None else "—")
+                c5.metric("To SL",     f"{to_sl:.1f} pts"     if to_sl     is not None else "—")
+
+        if ltp is None:
+            st.warning("Could not fetch live LTP — token may be expired. P&L shown as — ")
+        st.caption("P&L updates on each page refresh. Click **🔄 Refresh page** in the sidebar.")
+        st.divider()
+
+    # ── Pending Approvals ─────────────────────────────────────────────────
     st.header("Pending Approvals")
     st.caption(
         f"Mode: **{config.MODE.upper()}** — "
@@ -301,6 +352,13 @@ with tab_approvals:
 
     if not pending_rows:
         st.success("No pending signals — all caught up.")
+    elif open_trades:
+        # Block approvals while a trade is already active
+        st.warning(
+            f"⚠️ Trade #{open_trades[0]['id']} is still active. "
+            "Wait for it to close (target / SL) before approving a new one."
+        )
+        st.info(f"{len(pending_rows)} signal(s) are queued and will be available once the active trade closes.")
     else:
         for row in pending_rows:
             r = dict(row)
