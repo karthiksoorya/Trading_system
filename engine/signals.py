@@ -64,9 +64,12 @@ def generate_signal(
     if not zone.is_valid:
         return None
 
-    entry     = zone.proximal
-    stop_loss = zone.distal
-    risk      = abs(entry - stop_loss)
+    entry = zone.proximal
+    if zone.zone_class == "demand":
+        stop_loss = zone.distal - config.SL_BUFFER_POINTS
+    else:
+        stop_loss = zone.distal + config.SL_BUFFER_POINTS
+    risk = abs(entry - stop_loss)
 
     if risk == 0:
         return None

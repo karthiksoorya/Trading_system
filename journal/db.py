@@ -246,6 +246,14 @@ def get_pending_signals() -> list[sqlite3.Row]:
         ).fetchall()
 
 
+def get_open_trades() -> list[sqlite3.Row]:
+    """Approved trades that have not been closed yet."""
+    with _conn() as con:
+        return con.execute(
+            "SELECT * FROM signals WHERE status = 'approved' AND exit_price IS NULL"
+        ).fetchall()
+
+
 def approve_signal(signal_id: int):
     """User approved the signal — mark as active trade."""
     with _conn() as con:

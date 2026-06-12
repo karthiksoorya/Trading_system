@@ -43,6 +43,13 @@ TF_LOWER        = "5minute"    # entry
 # ── Candle Classification Threshold ───────────────────────────────────────
 EXCITING_CANDLE_BODY_RATIO = 0.50   # body > 50% of range → exciting
 
+# ── Stop Loss Buffer ───────────────────────────────────────────────────────
+# Extra points beyond the distal line to avoid SL being clipped by wicks.
+# Demand: SL = distal - SL_BUFFER_POINTS
+# Supply: SL = distal + SL_BUFFER_POINTS
+# Set to 0 for pure price action (SL exactly at distal).
+SL_BUFFER_POINTS = 5
+
 # ── Kite API Credentials (set via environment variables) ──────────────────
 # Export in terminal: set KITE_API_KEY=xxx  /  set KITE_API_SECRET=xxx
 KITE_API_KEY    = os.getenv("KITE_API_KEY", "")
@@ -65,3 +72,25 @@ RISK_PER_TRADE   = MAX_DAILY_LOSS / MAX_TRADES_PER_DAY  # ₹25
 # ── Data dir must exist ────────────────────────────────────────────────────
 DATA_DIR.mkdir(exist_ok=True)
 CSV_DIR.mkdir(exist_ok=True)
+
+# ── User settings (overrides above defaults) ──────────────────────────────
+# Written by the Streamlit dashboard; loaded here so the engine picks them up.
+SETTINGS_FILE = DATA_DIR / "settings.json"
+
+def load_settings():
+    """Return dict of user-saved settings, or {} if file missing."""
+    try:
+        import json
+        return json.loads(SETTINGS_FILE.read_text())
+    except Exception:
+        return {}
+
+def save_settings(overrides: dict):
+    """Merge overrides into the settings file."""
+    import json
+    current = load_settings()
+    current.update(overrides)
+    SETTINGS_FILE.write_text(json.dumps(current, indent=2))
+
+_s = load_settings()
+SL_BUFFER_POINTS = _s.get("SL_BUFFER_POINTS", SL_BUFFER_POINTS)

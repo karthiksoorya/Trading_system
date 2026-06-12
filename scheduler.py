@@ -24,7 +24,7 @@ from engine.confluence import check_confluence
 from engine.zones import detect_zones, update_zone_state
 from engine.signals import generate_signal
 from engine.position_size import calculate as size_trade
-from journal.db import init_db, log_signal, trades_today, daily_pnl
+from journal.db import init_db, log_signal, trades_today, daily_pnl, get_open_trades, close_trade
 from journal.export import export_day
 
 logging.basicConfig(
@@ -169,7 +169,55 @@ def _scan_core():
             )
 
 
+def monitor_open_trades():
+    """Check all approved open trades against current LTP. Auto-exit on target or SL hit."""
+    open_trades = get_open_trades()
+    if not open_trades:
+        return
+
+    try:
+        ltp = broker.get_ltp(config.NIFTY_SYMBOL)
+    except Exception as e:
+        logger.warning("monitor_open_trades: could not fetch LTP — %s", e)
+        return
+
+    for row in open_trades:
+        t = dict(row)
+        tid        = t["id"]
+        zone_class = t["zone_class"]
+        stop_loss  = t["stop_loss"]
+        target     = t["intraday_target"]
+
+        if zone_class == "demand":          # expecting price to rise
+            if ltp >= target:
+                close_trade(tid, target, "target")
+                logger.info("AUTO-EXIT #%d ✅ TARGET hit at %.2f (LTP %.2f)", tid, target, ltp)
+            elif ltp <= stop_loss:
+                close_trade(tid, stop_loss, "stoploss")
+                logger.info("AUTO-EXIT #%d ❌ STOPLOSS hit at %.2f (LTP %.2f)", tid, stop_loss, ltp)
+        else:                               # supply — expecting price to fall
+            if ltp <= target:
+                close_trade(tid, target, "target")
+                logger.info("AUTO-EXIT #%d ✅ TARGET hit at %.2f (LTP %.2f)", tid, target, ltp)
+            elif ltp >= stop_loss:
+                close_trade(tid, stop_loss, "stoploss")
+                logger.info("AUTO-EXIT #%d ❌ STOPLOSS hit at %.2f (LTP %.2f)", tid, stop_loss, ltp)
+
+
 def end_of_day():
+    """Close any still-open trades at EOD price, then export the day's CSV."""
+    open_trades = get_open_trades()
+    if open_trades:
+        try:
+            ltp = broker.get_ltp(config.NIFTY_SYMBOL)
+        except Exception:
+            ltp = None
+        for row in open_trades:
+            t = dict(row)
+            exit_price = ltp or t["entry"]   # fallback to entry if LTP unavailable
+            close_trade(t["id"], exit_price, "eod")
+            logger.info("EOD close #%d at %.2f", t["id"], exit_price)
+
     path = export_day()
     logger.info("End of day export → %s", path)
     logger.info("Daily P&L: %.2f pts", daily_pnl())
@@ -185,7 +233,8 @@ def run():
 
     schedule.every().day.at(config.SCAN_START).do(scan)
     schedule.every(5).minutes.do(scan)
-    schedule.every().day.at(config.MARKET_CLOSE).do(end_of_day)
+    schedule.every(1).minutes.do(monitor_open_trades)
+    schedule.every().day.at("15:20").do(end_of_day)   # 10 min before close
 
     logger.info("Scheduler running. Waiting for %s...", config.SCAN_START)
     while True:

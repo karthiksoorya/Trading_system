@@ -257,6 +257,27 @@ with tab_engine:
         f"Engine: {'🟢 Running (PID ' + str(_engine_pid()) + ')' if st.session_state.get('engine_on', False) else '🔴 Not running'}"
     )
 
+    st.divider()
+
+    # ── Settings ──────────────────────────────────────────────────────────
+    st.subheader("4. Settings")
+    st.caption("Changes take effect on the next engine start.")
+
+    _current = config.load_settings()
+
+    sl_buffer = st.slider(
+        "Stop Loss Buffer (points beyond distal line)",
+        min_value=0, max_value=30,
+        value=_current.get("SL_BUFFER_POINTS", config.SL_BUFFER_POINTS),
+        step=1,
+        help="0 = SL exactly at zone edge (pure price action). "
+             "5–10 = buffer to avoid being stopped by wicks.",
+    )
+
+    if st.button("💾 Save Settings"):
+        config.save_settings({"SL_BUFFER_POINTS": sl_buffer})
+        st.success(f"Saved — SL buffer: {sl_buffer} pts. Restart engine to apply.")
+
 # ══════════════════════════════════════════════════════════════════════════
 # TAB 2 — APPROVALS
 # ══════════════════════════════════════════════════════════════════════════
