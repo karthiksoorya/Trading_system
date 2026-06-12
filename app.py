@@ -477,7 +477,7 @@ with tab_signals:
         )
 
 # ══════════════════════════════════════════════════════════════════════════
-# TAB 3 — PERFORMANCE
+# TAB 4 — PERFORMANCE
 # ══════════════════════════════════════════════════════════════════════════
 with tab_performance:
     st.header("Performance")
@@ -488,36 +488,89 @@ with tab_performance:
         con.close()
 
         if all_df.empty:
-            st.info("No closed trades yet. Start paper trading to see stats here.")
+            st.info("No closed trades yet. Approve and complete a trade to see stats here.")
         else:
-            total    = len(all_df)
-            wins     = (all_df["result"] == "win").sum()
-            losses   = (all_df["result"] == "loss").sum()
-            win_rate = wins / total * 100 if total else 0
-            total_pnl = all_df["pnl_points"].sum()
+            all_df["pnl_points"] = pd.to_numeric(all_df["pnl_points"], errors="coerce").fillna(0)
+            all_df["date"]       = pd.to_datetime(all_df["date"])
 
+            total     = len(all_df)
+            wins      = (all_df["result"] == "win").sum()
+            losses    = (all_df["result"] == "loss").sum()
+            win_rate  = wins / total * 100 if total else 0
+            total_pnl = all_df["pnl_points"].sum()
+            avg_win   = all_df.loc[all_df["result"] == "win",  "pnl_points"].mean() if wins  else 0
+            avg_loss  = all_df.loc[all_df["result"] == "loss", "pnl_points"].mean() if losses else 0
+            profit_factor = abs(avg_win / avg_loss) if avg_loss else float("inf")
+            best_trade  = all_df["pnl_points"].max()
+            worst_trade = all_df["pnl_points"].min()
+
+            # ── Summary metrics ───────────────────────────────────────────
             m1, m2, m3, m4, m5 = st.columns(5)
             m1.metric("Total Trades", total)
             m2.metric("Win Rate",     f"{win_rate:.1f}%")
-            m3.metric("Wins",         int(wins))
-            m4.metric("Losses",       int(losses))
-            m5.metric("Total P&L",    f"{total_pnl:.2f} pts")
+            m3.metric("Total P&L",    f"{total_pnl:.2f} pts")
+            m4.metric("Avg Win",      f"+{avg_win:.2f} pts")
+            m5.metric("Avg Loss",     f"{avg_loss:.2f} pts")
+
+            m6, m7, m8, m9, m10 = st.columns(5)
+            m6.metric("Wins",          int(wins))
+            m7.metric("Losses",        int(losses))
+            m8.metric("Profit Factor", f"{profit_factor:.2f}" if profit_factor != float("inf") else "∞")
+            m9.metric("Best Trade",    f"+{best_trade:.2f} pts")
+            m10.metric("Worst Trade",  f"{worst_trade:.2f} pts")
 
             st.divider()
 
-            # Validation checklist from master doc
+            # ── Cumulative P&L curve ──────────────────────────────────────
+            st.subheader("Cumulative P&L")
+            cum_df = all_df.sort_values("date")[["date", "pnl_points"]].copy()
+            cum_df["cumulative"] = cum_df["pnl_points"].cumsum()
+            st.line_chart(cum_df.set_index("date")["cumulative"], use_container_width=True)
+
+            st.divider()
+
+            # ── Daily P&L bar chart ───────────────────────────────────────
+            st.subheader("Daily P&L")
+            daily_df = all_df.groupby(all_df["date"].dt.date)["pnl_points"].sum().reset_index()
+            daily_df.columns = ["date", "P&L"]
+            st.bar_chart(daily_df.set_index("date"), use_container_width=True)
+
+            st.divider()
+
+            # ── Breakdown ─────────────────────────────────────────────────
+            st.subheader("Breakdown")
+            col_left, col_right = st.columns(2)
+
+            with col_left:
+                st.caption("By Zone Type")
+                zone_df = all_df.groupby("zone_type")["pnl_points"].agg(
+                    Trades="count", Total_PnL="sum", Win_Rate=lambda x: (x > 0).mean() * 100
+                ).reset_index()
+                st.dataframe(zone_df, use_container_width=True, hide_index=True)
+
+            with col_right:
+                st.caption("By Timeframe")
+                tf_df = all_df.groupby("timeframe")["pnl_points"].agg(
+                    Trades="count", Total_PnL="sum", Win_Rate=lambda x: (x > 0).mean() * 100
+                ).reset_index()
+                st.dataframe(tf_df, use_container_width=True, hide_index=True)
+
+            st.divider()
+
+            # ── Validation checklist ──────────────────────────────────────
             st.subheader("Validation Checklist (before going live)")
-            avg_rr = all_df["pnl_points"].mean() if total else 0
-
-            st.checkbox(f"20+ trades logged ({total} so far)",    value=total >= 20)
-            st.checkbox(f"Win rate > 50% ({win_rate:.1f}%)",      value=win_rate > 50)
-            st.checkbox(f"Avg P&L positive ({avg_rr:.2f} pts)",   value=avg_rr > 0)
-            st.checkbox("System detects zones correctly",          value=False)
-            st.checkbox("No crashes for 5 consecutive days",      value=False)
+            avg_pnl = all_df["pnl_points"].mean()
+            st.checkbox(f"20+ trades logged ({total} so far)",   value=total >= 20)
+            st.checkbox(f"Win rate > 50% ({win_rate:.1f}%)",     value=win_rate > 50)
+            st.checkbox(f"Avg P&L positive ({avg_pnl:.2f} pts)", value=avg_pnl > 0)
+            st.checkbox("System detects zones correctly",         value=False)
+            st.checkbox("No crashes for 5 consecutive days",     value=False)
 
             st.divider()
-            st.subheader("All Closed Trades")
-            st.dataframe(all_df, use_container_width=True, hide_index=True)
+
+            # ── Raw trade log ─────────────────────────────────────────────
+            with st.expander("📋 All Closed Trades"):
+                st.dataframe(all_df, use_container_width=True, hide_index=True)
 
     except Exception as e:
         st.warning(f"Could not load performance data: {e}")
