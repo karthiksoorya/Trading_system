@@ -14,6 +14,7 @@ logger = logging.getLogger(__name__)
 _CREATE_SIGNALS = """
 CREATE TABLE IF NOT EXISTS signals (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    status          TEXT NOT NULL DEFAULT 'pending',  -- pending | approved | rejected
     date            TEXT NOT NULL,
     time_signal     TEXT NOT NULL,
     zone_type       TEXT NOT NULL,   -- DBR | RBR | RBD | DBD
@@ -92,6 +93,7 @@ def _migrate(con):
     migrations = [
         ("confluence_count", "INTEGER DEFAULT 1"),
         ("confluence_tfs",   "TEXT"),
+        ("status",           "TEXT NOT NULL DEFAULT 'pending'"),
     ]
     for col, definition in migrations:
         if col not in existing:
@@ -218,12 +220,50 @@ def get_signals_for_date(trade_date: Optional[str] = None) -> list[sqlite3.Row]:
 
 
 def trades_today() -> int:
+    """Count approved trades taken today (excludes pending and rejected)."""
     with _conn() as con:
         row = con.execute(
-            "SELECT COUNT(*) FROM signals WHERE date=? AND exit_price IS NOT NULL",
+            "SELECT COUNT(*) FROM signals WHERE date=? AND status NOT IN ('pending', 'rejected')",
             (date.today().isoformat(),),
         ).fetchone()
         return row[0] if row else 0
+
+
+def pending_count() -> int:
+    """Number of signals waiting for user approval."""
+    with _conn() as con:
+        row = con.execute(
+            "SELECT COUNT(*) FROM signals WHERE status = 'pending'"
+        ).fetchone()
+        return row[0] if row else 0
+
+
+def get_pending_signals() -> list[sqlite3.Row]:
+    """All signals awaiting approval, newest first."""
+    with _conn() as con:
+        return con.execute(
+            "SELECT * FROM signals WHERE status = 'pending' ORDER BY id DESC"
+        ).fetchall()
+
+
+def approve_signal(signal_id: int):
+    """User approved the signal — mark as active trade."""
+    with _conn() as con:
+        con.execute(
+            "UPDATE signals SET status = 'approved' WHERE id = ?",
+            (signal_id,),
+        )
+    logger.info("Signal #%d approved.", signal_id)
+
+
+def reject_signal(signal_id: int):
+    """User rejected the signal — skip it."""
+    with _conn() as con:
+        con.execute(
+            "UPDATE signals SET status = 'rejected' WHERE id = ?",
+            (signal_id,),
+        )
+    logger.info("Signal #%d rejected.", signal_id)
 
 
 def daily_pnl(trade_date: Optional[str] = None) -> float:

@@ -19,7 +19,11 @@ import pandas as pd
 import streamlit as st
 
 import config
-from journal.db import init_db, close_trade, trades_today, daily_pnl, get_signals_for_date
+from journal.db import (
+    init_db, close_trade, trades_today, daily_pnl,
+    get_signals_for_date, get_pending_signals, pending_count,
+    approve_signal, reject_signal,
+)
 from journal.export import export_day
 from scheduler import is_market_open, get_last_trading_day
 
@@ -99,6 +103,8 @@ with st.sidebar:
 
     engine_running = st.session_state.get("engine_on", is_engine_running())
     st.metric("Engine",       "🟢 Running" if engine_running else "🔴 Stopped")
+    _pending = pending_count()
+    st.metric("Pending",      f"🔔 {_pending} signal(s)" if _pending else "✅ None")
     st.metric("Trades Today", trades_today())
     st.metric("Daily P&L",    f"{daily_pnl():.2f} pts")
     st.divider()
@@ -178,8 +184,9 @@ def _engine_panel():
 
 
 # ── Tabs ──────────────────────────────────────────────────────────────────
-tab_engine, tab_signals, tab_performance = st.tabs([
-    "🔧 Engine", "📊 Signals", "📈 Performance"
+_pending_label = f"🔔 Approvals ({pending_count()})" if pending_count() else "🔔 Approvals"
+tab_engine, tab_approvals, tab_signals, tab_performance = st.tabs([
+    "🔧 Engine", _pending_label, "📊 Signals", "📈 Performance"
 ])
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -251,7 +258,59 @@ with tab_engine:
     )
 
 # ══════════════════════════════════════════════════════════════════════════
-# TAB 2 — SIGNALS
+# TAB 2 — APPROVALS
+# ══════════════════════════════════════════════════════════════════════════
+with tab_approvals:
+    st.header("Pending Approvals")
+    st.caption(
+        f"Mode: **{config.MODE.upper()}** — "
+        + ("Approving will log the trade. No real order is placed in paper mode."
+           if config.MODE == "paper"
+           else "Approving will place a LIVE order on Kite.")
+    )
+
+    pending_rows = get_pending_signals()
+
+    if not pending_rows:
+        st.success("No pending signals — all caught up.")
+    else:
+        for row in pending_rows:
+            r = dict(row)
+            zone_label = (
+                f"🟢 DEMAND {r['zone_type']}"
+                if r["zone_class"] == "demand"
+                else f"🔴 SUPPLY {r['zone_type']}"
+            )
+            with st.container(border=True):
+                st.subheader(f"Signal #{r['id']} — {zone_label} | {r['timeframe']}")
+
+                m1, m2, m3, m4, m5 = st.columns(5)
+                m1.metric("Entry",    f"{r['entry']:.2f}")
+                m2.metric("Stop Loss", f"{r['stop_loss']:.2f}")
+                m3.metric("Target",   f"{r['intraday_target']:.2f}")
+                m4.metric("Score",    f"{r['booster_score']:.1f}/10")
+                m5.metric("Type",     f"Type {r['entry_type']}")
+
+                risk_pts = abs(r["entry"] - r["stop_loss"])
+                rr = abs(r["intraday_target"] - r["entry"]) / risk_pts if risk_pts else 0
+                st.caption(
+                    f"Risk: **{risk_pts:.1f} pts** | R:R 1:{rr:.1f} | "
+                    f"Confluence: {r.get('confluence_tfs') or '—'} | "
+                    f"Position size: {r.get('position_size', '—')}"
+                )
+
+                ba, br, _ = st.columns([1, 1, 2])
+                if ba.button("✅ Approve", type="primary", use_container_width=True, key=f"app_{r['id']}"):
+                    approve_signal(r["id"])
+                    st.toast(f"Signal #{r['id']} approved — trade is active.", icon="✅")
+                    st.rerun()
+                if br.button("❌ Reject", use_container_width=True, key=f"rej_{r['id']}"):
+                    reject_signal(r["id"])
+                    st.toast(f"Signal #{r['id']} rejected.", icon="❌")
+                    st.rerun()
+
+# ══════════════════════════════════════════════════════════════════════════
+# TAB 3 — SIGNALS
 # ══════════════════════════════════════════════════════════════════════════
 with tab_signals:
     st.header("Signals")
@@ -264,7 +323,7 @@ with tab_signals:
         df = pd.DataFrame([dict(r) for r in rows])
 
         display_cols = [
-            "id", "date", "time_signal", "zone_type", "zone_class", "timeframe",
+            "id", "status", "date", "time_signal", "zone_type", "zone_class", "timeframe",
             "entry", "stop_loss", "intraday_target",
             "booster_score", "confluence_count", "confluence_tfs",
             "entry_type", "position_size",
@@ -285,7 +344,11 @@ with tab_signals:
         st.divider()
 
         # ── Close trade ───────────────────────────────────────────────────
-        open_df = df[df["exit_price"].isna()] if "exit_price" in df.columns else pd.DataFrame()
+        open_df = (
+            df[(df["exit_price"].isna()) & (df["status"] == "approved")]
+            if "exit_price" in df.columns and "status" in df.columns
+            else pd.DataFrame()
+        )
 
         if not open_df.empty:
             st.subheader("Close a Trade")
