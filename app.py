@@ -22,7 +22,7 @@ import config
 from journal.db import (
     init_db, close_trade, trades_today, daily_pnl,
     get_signals_for_date, get_pending_signals, pending_count,
-    approve_signal, reject_signal,
+    approve_signal, reject_signal, reject_all_pending,
 )
 from journal.export import export_day
 from scheduler import is_market_open, get_last_trading_day
@@ -291,6 +291,13 @@ with tab_approvals:
     )
 
     pending_rows = get_pending_signals()
+
+    if pending_rows:
+        if st.button(f"🗑 Reject All {len(pending_rows)} Pending", type="secondary"):
+            n = reject_all_pending()
+            st.toast(f"Rejected {n} signals — data kept for analysis.", icon="🗑")
+            st.rerun()
+        st.divider()
 
     if not pending_rows:
         st.success("No pending signals — all caught up.")
