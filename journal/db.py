@@ -230,20 +230,34 @@ def trades_today() -> int:
 
 
 def pending_count() -> int:
-    """Number of signals waiting for user approval."""
+    """Number of today's signals waiting for user approval."""
     with _conn() as con:
         row = con.execute(
-            "SELECT COUNT(*) FROM signals WHERE status = 'pending'"
+            "SELECT COUNT(*) FROM signals WHERE status = 'pending' AND date = ?",
+            (date.today().isoformat(),),
         ).fetchone()
         return row[0] if row else 0
 
 
 def get_pending_signals() -> list[sqlite3.Row]:
-    """All signals awaiting approval, newest first."""
+    """Today's signals awaiting approval, newest first."""
     with _conn() as con:
         return con.execute(
-            "SELECT * FROM signals WHERE status = 'pending' ORDER BY id DESC"
+            "SELECT * FROM signals WHERE status = 'pending' AND date = ? ORDER BY id DESC",
+            (date.today().isoformat(),),
         ).fetchall()
+
+
+def expire_stale_pending():
+    """Auto-reject any pending signals from previous days — they are no longer actionable."""
+    with _conn() as con:
+        count = con.execute(
+            "UPDATE signals SET status = 'rejected' WHERE status = 'pending' AND date < ?",
+            (date.today().isoformat(),),
+        ).rowcount
+    if count:
+        logger.info("Expired %d stale pending signal(s) from previous days.", count)
+    return count
 
 
 def get_open_trades() -> list[sqlite3.Row]:

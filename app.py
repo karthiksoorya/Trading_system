@@ -23,6 +23,7 @@ from journal.db import (
     init_db, close_trade, trades_today, daily_pnl,
     get_signals_for_date, get_pending_signals, pending_count,
     approve_signal, reject_signal, reject_all_pending, get_open_trades,
+    expire_stale_pending,
 )
 from journal.export import export_day
 from scheduler import is_market_open, get_last_trading_day
@@ -43,6 +44,7 @@ st.set_page_config(
     layout="wide",
 )
 init_db()
+expire_stale_pending()
 
 # ── Engine helpers ────────────────────────────────────────────────────────
 
