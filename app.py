@@ -390,6 +390,8 @@ with tab_approvals:
                 ba, br, _ = st.columns([1, 1, 2])
                 if ba.button("✅ Approve", type="primary", use_container_width=True, key=f"app_{r['id']}"):
                     approve_signal(r["id"])
+                    import notify
+                    notify.trade_approved(r["id"], r["entry"], r["stop_loss"], r["intraday_target"])
                     st.toast(f"Signal #{r['id']} approved — trade is active.", icon="✅")
                     st.rerun()
                 if br.button("❌ Reject", use_container_width=True, key=f"rej_{r['id']}"):

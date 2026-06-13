@@ -26,6 +26,7 @@ from engine.signals import generate_signal
 from engine.position_size import calculate as size_trade
 from journal.db import init_db, log_signal, trades_today, daily_pnl, get_open_trades, close_trade
 from journal.export import export_day
+import notify
 
 logging.basicConfig(
     level=logging.INFO,
@@ -167,6 +168,17 @@ def _scan_core():
                 signal.confluence.label(),
                 signal.entry, signal.stop_loss, signal.intraday_target,
             )
+            notify.signal_detected(
+                signal_id=sig_id,
+                zone_class=signal.zone.zone_class,
+                zone_type=signal.zone.zone_type,
+                timeframe=tf,
+                entry=signal.entry,
+                sl=signal.stop_loss,
+                target=signal.intraday_target,
+                score=signal.boosters.total,
+                confluence=signal.confluence.label(),
+            )
 
 
 def monitor_open_trades():
@@ -190,18 +202,26 @@ def monitor_open_trades():
 
         if zone_class == "demand":          # expecting price to rise
             if ltp >= target:
+                pnl = round(target - t["entry"], 2)
                 close_trade(tid, target, "target")
-                logger.info("AUTO-EXIT #%d ✅ TARGET hit at %.2f (LTP %.2f)", tid, target, ltp)
+                logger.info("AUTO-EXIT #%d TARGET hit at %.2f (LTP %.2f)", tid, target, ltp)
+                notify.trade_closed(tid, target, "target", pnl)
             elif ltp <= stop_loss:
+                pnl = round(stop_loss - t["entry"], 2)
                 close_trade(tid, stop_loss, "stoploss")
-                logger.info("AUTO-EXIT #%d ❌ STOPLOSS hit at %.2f (LTP %.2f)", tid, stop_loss, ltp)
+                logger.info("AUTO-EXIT #%d STOPLOSS hit at %.2f (LTP %.2f)", tid, stop_loss, ltp)
+                notify.trade_closed(tid, stop_loss, "stoploss", pnl)
         else:                               # supply — expecting price to fall
             if ltp <= target:
+                pnl = round(t["entry"] - target, 2)
                 close_trade(tid, target, "target")
-                logger.info("AUTO-EXIT #%d ✅ TARGET hit at %.2f (LTP %.2f)", tid, target, ltp)
+                logger.info("AUTO-EXIT #%d TARGET hit at %.2f (LTP %.2f)", tid, target, ltp)
+                notify.trade_closed(tid, target, "target", pnl)
             elif ltp >= stop_loss:
+                pnl = round(t["entry"] - stop_loss, 2)
                 close_trade(tid, stop_loss, "stoploss")
-                logger.info("AUTO-EXIT #%d ❌ STOPLOSS hit at %.2f (LTP %.2f)", tid, stop_loss, ltp)
+                logger.info("AUTO-EXIT #%d STOPLOSS hit at %.2f (LTP %.2f)", tid, stop_loss, ltp)
+                notify.trade_closed(tid, stop_loss, "stoploss", pnl)
 
 
 def end_of_day():
@@ -220,7 +240,16 @@ def end_of_day():
 
     path = export_day()
     logger.info("End of day export → %s", path)
-    logger.info("Daily P&L: %.2f pts", daily_pnl())
+
+    from journal.db import get_signals_for_date
+    from datetime import date as _date
+    today = _date.today().isoformat()
+    closed = [dict(r) for r in get_signals_for_date(today) if r["result"] is not None]
+    wins   = sum(1 for t in closed if t["result"] == "win")
+    losses = sum(1 for t in closed if t["result"] == "loss")
+    pnl    = daily_pnl()
+    logger.info("Daily P&L: %.2f pts", pnl)
+    notify.eod_summary(trades=len(closed), wins=wins, losses=losses, total_pnl=pnl)
 
 
 def run():
