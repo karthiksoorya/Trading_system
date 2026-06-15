@@ -24,7 +24,7 @@ from engine.confluence import check_confluence
 from engine.zones import detect_zones, update_zone_state
 from engine.signals import generate_signal
 from engine.position_size import calculate as size_trade
-from journal.db import init_db, log_signal, trades_today, daily_pnl, get_open_trades, close_trade
+from journal.db import init_db, log_signal, trades_today, daily_pnl, get_open_trades, close_trade, zone_signaled_today
 from journal.export import export_day
 import notify
 
@@ -131,16 +131,20 @@ def _scan_core():
         valid_zones[tf] = good
         logger.info("[%s] %d valid zone(s) found", tf, len(good))
 
-    # ── Step 2: generate signals with confluence ──────────────────────────
+    # ── Step 2: generate signals ──────────────────────────────────────────
+    # Only the selected entry TF generates signals.
+    # All other TFs are used for confluence scoring only.
+    entry_tf = config.load_settings().get("ENTRY_TIMEFRAME", config.TF_LOWER)
     for i, tf in enumerate(_TF_ORDER):
         if tf not in active_tfs:
+            continue
+        if tf != entry_tf:                 # non-entry TFs → confluence only
             continue
         zones = valid_zones.get(tf, [])
         candles = recent_candles.get(tf, [])
         if not zones or not candles:
             continue
 
-        # Only check TFs that are HIGHER than the current entry TF
         higher_tf_zones = {
             htf: valid_zones.get(htf, [])
             for htf in _TF_ORDER[i + 1:]
@@ -148,6 +152,10 @@ def _scan_core():
 
         for zone in zones:
             if zone.zone_class not in active_classes:
+                continue
+
+            # Skip if this exact zone already signaled today
+            if zone_signaled_today(zone.zone_class, zone.zone_type, tf, zone.proximal):
                 continue
             sizing = size_trade(zone.proximal, zone.distal, trades_today())
             if sizing.get("error"):

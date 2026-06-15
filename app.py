@@ -292,11 +292,19 @@ with tab_engine:
     )
 
     all_tfs = [config.TF_LOWER, config.TF_INTERMEDIATE, config.TF_HIGHER]
+
+    entry_tf = st.selectbox(
+        "Entry Timeframe (generates signals)",
+        options=all_tfs,
+        index=all_tfs.index(_current.get("ENTRY_TIMEFRAME", config.TF_LOWER)),
+        help="Only this TF generates entry signals. The other two are used for confluence scoring only.",
+    )
+
     scan_tfs = st.multiselect(
-        "Scan Timeframes",
+        "Confluence Timeframes (include in scan)",
         options=all_tfs,
         default=_current.get("SCAN_TIMEFRAMES", all_tfs),
-        help="Remove a TF to skip it entirely. Changes apply on next scan cycle.",
+        help="TFs used to build confluence. Entry TF is always included automatically.",
     )
 
     scan_classes = st.multiselect(
@@ -314,10 +322,11 @@ with tab_engine:
         else:
             config.save_settings({
                 "SL_BUFFER_POINTS":  sl_buffer,
+                "ENTRY_TIMEFRAME":   entry_tf,
                 "SCAN_TIMEFRAMES":   scan_tfs,
                 "SCAN_ZONE_CLASSES": scan_classes,
             })
-            st.success(f"Saved — SL buffer: {sl_buffer} pts | TFs: {scan_tfs} | Classes: {scan_classes}")
+            st.success(f"Saved — Entry TF: {entry_tf} | SL buffer: {sl_buffer} pts | Classes: {scan_classes}")
 
 # ══════════════════════════════════════════════════════════════════════════
 # TAB 2 — APPROVALS

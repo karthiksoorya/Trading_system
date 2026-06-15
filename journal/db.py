@@ -264,6 +264,19 @@ def expire_stale_pending():
     return count
 
 
+def zone_signaled_today(zone_class: str, zone_type: str, timeframe: str, proximal: float) -> bool:
+    """Return True if this exact zone already has a signal logged today."""
+    with _conn() as con:
+        row = con.execute(
+            """SELECT id FROM signals
+               WHERE date=? AND zone_class=? AND zone_type=? AND timeframe=? AND proximal=?
+               AND status != 'rejected'
+               LIMIT 1""",
+            (date.today().isoformat(), zone_class, zone_type, timeframe, proximal),
+        ).fetchone()
+        return row is not None
+
+
 def get_open_trades() -> list[sqlite3.Row]:
     """Trades approved by user that are still active (not yet closed)."""
     with _conn() as con:
