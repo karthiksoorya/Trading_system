@@ -386,9 +386,17 @@ with tab_approvals:
 
     if pending_rows:
         if st.button(f"🗑 Reject All {len(pending_rows)} Pending", type="secondary"):
-            n = reject_all_pending()
-            st.toast(f"Rejected {n} signals — data kept for analysis.", icon="🗑")
+            try:
+                n = reject_all_pending()
+                st.session_state["reject_msg"] = f"✅ Rejected {n} signals — data kept for analysis."
+            except Exception as e:
+                st.session_state["reject_msg"] = f"❌ Error: {e}"
             st.rerun()
+
+    if "reject_msg" in st.session_state:
+        st.success(st.session_state.pop("reject_msg"))
+
+    if pending_rows:
         st.divider()
 
     if not pending_rows:

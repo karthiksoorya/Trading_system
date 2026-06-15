@@ -286,7 +286,7 @@ def get_open_trades() -> list[sqlite3.Row]:
 
 
 def reject_all_pending():
-    """Bulk-reject every pending signal (e.g. to clear stale test data)."""
+    """Bulk-reject all pending signals (any date)."""
     with _conn() as con:
         count = con.execute(
             "UPDATE signals SET status = 'rejected' WHERE status = 'pending'"
