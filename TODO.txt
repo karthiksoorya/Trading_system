@@ -1,7 +1,89 @@
-Pending Items todo
-* VPS - Run automatically. (Notes are in chat)
-* Check the Timings 10:05
-* Trading Journal - Store separate daily csv with datetime stamp
-* Login Automation (Not Primary)
-* Automated from Mobile
-* Refresh the Streamlit
+Nifty Trading System — TODO
+Last updated: June 2026
+============================================================
+
+✅ DONE
+------------------------------------------------------------
+[x] Config + broker adapter (Kite)
+[x] Candle classification (boring/exciting)
+[x] Zone detection (DBR/RBR/RBD/DBD)
+[x] Booster scoring (freshness/strength/time/RR)
+[x] Multi-timeframe confluence (5min + 15min + 60min)
+[x] Position sizing (S.E.T.S — 1% risk/day)
+[x] SQLite journal with CSV export
+[x] Streamlit dashboard (Engine / Approvals / Signals / Performance)
+[x] Approval flow (pending → approved → closed/rejected)
+[x] Auto-exit on target / SL hit (monitor every 1 min)
+[x] EOD auto-close at 15:20
+[x] One active trade at a time (gate in Approvals tab)
+[x] Today-only approvals (stale signals auto-rejected on startup)
+[x] Telegram notifications (signal / approve / close / EOD summary)
+[x] SL buffer configurable via UI slider (settings.json)
+[x] Scan timeframe filter (multiselect in Settings)
+[x] Zone class filter (demand/supply toggle in Settings)
+[x] Engine auto-stop at 15:35
+[x] Holiday detection (15 min frozen LTP → auto-stop)
+[x] Stop Engine flag via settings.json (works under systemd)
+[x] Approval gate fix (status='closed' authoritative)
+[x] VPS deployment (running at 13.201.210.4:8501)
+[x] .env for credentials (gitignored)
+[x] Daily CSV export with date stamp
+[x] Performance tab (cumulative P&L, daily chart, zone/TF breakdown)
+[x] Project context doc (docs/PROJECT_CONTEXT.md)
+
+
+⏳ PENDING — HIGH PRIORITY
+------------------------------------------------------------
+[ ] VPS systemd auto-start
+      → Engine should restart automatically if VPS reboots
+      → Create /etc/systemd/system/nifty-engine.service
+      → Also a separate service for streamlit
+
+[ ] Streamlit auto-refresh
+      → Page should refresh every 30–60s without manual click
+      → Use streamlit-autorefresh package or st.fragment run_every
+
+[ ] Kite daily token via Telegram
+      → Bot sends login link to Telegram every morning at 8:30 AM
+      → You click, paste redirect URL back to bot
+      → Bot saves token automatically (no need to open dashboard)
+
+
+⏳ PENDING — MEDIUM PRIORITY
+------------------------------------------------------------
+[ ] Kite login automation (deferred — not primary)
+      → Playwright + pyotp to fully automate daily token
+      → Requires TOTP secret key from Zerodha 2FA setup
+      → Only if TOTP (Google Authenticator) is used, not SMS OTP
+
+[ ] Live order placement
+      → place_order() in KiteAdapter
+      → CE for demand zones, PE for supply zones
+      → Strike price selection logic (ATM or based on entry)
+      → Gate behind config.MODE == "live"
+      → Only after 20+ paper trades validated
+
+
+⏳ PENDING — LOW PRIORITY
+------------------------------------------------------------
+[ ] Bank Nifty support
+      → Add BANKNIFTY_SYMBOL to config
+      → Same zone/signal logic applies
+
+[ ] Upstox adapter
+      → Implement when Upstox API is enabled on account
+
+[ ] Mobile-optimised UI
+      → Current Streamlit works on phone but not mobile-first
+      → Future: React UI (Phase 2 from master doc)
+
+
+🎯 VALIDATION CHECKLIST (before going live)
+------------------------------------------------------------
+[ ] 20+ paper trades logged
+[ ] Win rate > 50%
+[ ] Avg P&L positive
+[ ] System detects zones correctly (verify 5+ manually)
+[ ] No crashes for 5 consecutive trading days
+      → Check in Performance tab
+============================================================
