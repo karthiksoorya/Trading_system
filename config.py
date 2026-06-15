@@ -93,4 +93,6 @@ def save_settings(overrides: dict):
     SETTINGS_FILE.write_text(json.dumps(current, indent=2))
 
 _s = load_settings()
-SL_BUFFER_POINTS = _s.get("SL_BUFFER_POINTS", SL_BUFFER_POINTS)
+SL_BUFFER_POINTS  = _s.get("SL_BUFFER_POINTS",  SL_BUFFER_POINTS)
+SCAN_TIMEFRAMES   = _s.get("SCAN_TIMEFRAMES",   [TF_LOWER, TF_INTERMEDIATE, TF_HIGHER])
+SCAN_ZONE_CLASSES = _s.get("SCAN_ZONE_CLASSES", ["demand", "supply"])

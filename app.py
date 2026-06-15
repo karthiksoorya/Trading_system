@@ -55,12 +55,16 @@ def _engine_pid() -> int | None:
         return None
 
 def is_engine_running() -> bool:
+    # Primary check: flag in settings.json (works even under systemd)
+    if config.load_settings().get("engine_state") == "stopped":
+        config.ENGINE_PID_FILE.unlink(missing_ok=True)
+        return False
+    # Secondary check: is the PID actually alive?
     pid = _engine_pid()
     if pid is None:
         return False
     try:
         if sys.platform == "win32":
-            # os.kill(pid, 0) is unreliable on Windows — use tasklist instead
             out = subprocess.check_output(
                 ["tasklist", "/FI", f"PID eq {pid}", "/NH"],
                 stderr=subprocess.DEVNULL,
@@ -76,6 +80,7 @@ def is_engine_running() -> bool:
     return alive
 
 def start_engine():
+    config.save_settings({"engine_state": "running"})
     proc = subprocess.Popen(
         [sys.executable, str(config.BASE_DIR / "main.py"), "--run"],
         cwd=str(config.BASE_DIR),
@@ -83,6 +88,8 @@ def start_engine():
     config.ENGINE_PID_FILE.write_text(str(proc.pid))
 
 def stop_engine():
+    # Set flag first — engine loop will exit gracefully within 30s
+    config.save_settings({"engine_state": "stopped"})
     pid = _engine_pid()
     if pid:
         try:
@@ -281,13 +288,36 @@ with tab_engine:
         min_value=0, max_value=30,
         value=_current.get("SL_BUFFER_POINTS", config.SL_BUFFER_POINTS),
         step=1,
-        help="0 = SL exactly at zone edge (pure price action). "
-             "5–10 = buffer to avoid being stopped by wicks.",
+        help="0 = SL exactly at zone edge. 5–10 = buffer to avoid wick stop-outs.",
+    )
+
+    all_tfs = [config.TF_LOWER, config.TF_INTERMEDIATE, config.TF_HIGHER]
+    scan_tfs = st.multiselect(
+        "Scan Timeframes",
+        options=all_tfs,
+        default=_current.get("SCAN_TIMEFRAMES", all_tfs),
+        help="Remove a TF to skip it entirely. Changes apply on next scan cycle.",
+    )
+
+    scan_classes = st.multiselect(
+        "Zone Classes",
+        options=["demand", "supply"],
+        default=_current.get("SCAN_ZONE_CLASSES", ["demand", "supply"]),
+        help="Uncheck 'supply' to only trade demand zones (long bias), or vice versa.",
     )
 
     if st.button("💾 Save Settings"):
-        config.save_settings({"SL_BUFFER_POINTS": sl_buffer})
-        st.success(f"Saved — SL buffer: {sl_buffer} pts. Restart engine to apply.")
+        if not scan_tfs:
+            st.error("Select at least one timeframe.")
+        elif not scan_classes:
+            st.error("Select at least one zone class.")
+        else:
+            config.save_settings({
+                "SL_BUFFER_POINTS":  sl_buffer,
+                "SCAN_TIMEFRAMES":   scan_tfs,
+                "SCAN_ZONE_CLASSES": scan_classes,
+            })
+            st.success(f"Saved — SL buffer: {sl_buffer} pts | TFs: {scan_tfs} | Classes: {scan_classes}")
 
 # ══════════════════════════════════════════════════════════════════════════
 # TAB 2 — APPROVALS

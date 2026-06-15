@@ -99,6 +99,10 @@ def _migrate(con):
         if col not in existing:
             con.execute(f"ALTER TABLE signals ADD COLUMN {col} {definition}")
             logger.info("DB migration: added column %s", col)
+    # Fix any rows closed before status='closed' was introduced
+    con.execute(
+        "UPDATE signals SET status='closed' WHERE status='approved' AND exit_price IS NOT NULL"
+    )
 
 
 # ── Write ─────────────────────────────────────────────────────────────────
@@ -158,7 +162,7 @@ def close_trade(
         con.execute(
             """
             UPDATE signals
-            SET exit_time=?, exit_price=?, exit_reason=?,
+            SET status='closed', exit_time=?, exit_price=?, exit_reason=?,
                 pnl_points=?, result=?, notes=?
             WHERE id=?
             """,
@@ -261,10 +265,10 @@ def expire_stale_pending():
 
 
 def get_open_trades() -> list[sqlite3.Row]:
-    """Approved trades that have not been closed yet."""
+    """Trades approved by user that are still active (not yet closed)."""
     with _conn() as con:
         return con.execute(
-            "SELECT * FROM signals WHERE status = 'approved' AND exit_price IS NULL"
+            "SELECT * FROM signals WHERE status = 'approved'"
         ).fetchall()
 
 

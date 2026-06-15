@@ -103,6 +103,10 @@ def _scan_core():
     ltp = broker.get_ltp(config.NIFTY_SYMBOL)
     logger.info("LTP: %.2f", ltp)
 
+    # Active filters (re-read each scan so UI changes apply immediately)
+    active_tfs     = config.load_settings().get("SCAN_TIMEFRAMES",   _TF_ORDER)
+    active_classes = set(config.load_settings().get("SCAN_ZONE_CLASSES", ["demand", "supply"]))
+
     # ── Step 1: collect valid zones for every TF ──────────────────────────
     valid_zones: dict[str, list] = {}
     recent_candles: dict[str, list] = {}
@@ -129,6 +133,8 @@ def _scan_core():
 
     # ── Step 2: generate signals with confluence ──────────────────────────
     for i, tf in enumerate(_TF_ORDER):
+        if tf not in active_tfs:
+            continue
         zones = valid_zones.get(tf, [])
         candles = recent_candles.get(tf, [])
         if not zones or not candles:
@@ -141,6 +147,8 @@ def _scan_core():
         }
 
         for zone in zones:
+            if zone.zone_class not in active_classes:
+                continue
             sizing = size_trade(zone.proximal, zone.distal, trades_today())
             if sizing.get("error"):
                 continue
@@ -266,6 +274,47 @@ def run():
     schedule.every().day.at("15:20").do(end_of_day)   # 10 min before close
 
     logger.info("Scheduler running. Waiting for %s...", config.SCAN_START)
+
+    _last_ltp        = None
+    _flat_ticks      = 0          # consecutive 30s ticks with unchanged LTP
+    _HOLIDAY_TICKS   = 30         # 30 × 30s = 15 min of no movement → holiday
+
     while True:
         schedule.run_pending()
+
+        now = datetime.now()
+        hhmm = now.strftime("%H:%M")
+
+        # ── Graceful stop via UI flag ─────────────────────────────────────
+        if config.load_settings().get("engine_state") == "stopped":
+            logger.info("Stop flag set — engine shutting down gracefully.")
+            config.ENGINE_PID_FILE.unlink(missing_ok=True)
+            break
+
+        # ── Auto-stop after market close ──────────────────────────────────
+        if now.weekday() < 5 and hhmm >= "15:35":
+            logger.info("Market closed (15:35) — engine shutting down.")
+            end_of_day()
+            config.ENGINE_PID_FILE.unlink(missing_ok=True)
+            break
+
+        # ── Holiday detection: no LTP movement for 15 min ─────────────────
+        if is_market_open():
+            try:
+                ltp = broker.get_ltp(config.NIFTY_SYMBOL)
+                if ltp == _last_ltp:
+                    _flat_ticks += 1
+                else:
+                    _flat_ticks = 0
+                    _last_ltp = ltp
+                if _flat_ticks >= _HOLIDAY_TICKS:
+                    logger.warning(
+                        "LTP unchanged for 15 min during market hours — "
+                        "possible holiday. Engine shutting down."
+                    )
+                    config.ENGINE_PID_FILE.unlink(missing_ok=True)
+                    break
+            except Exception:
+                pass   # network blip — don't stop, just skip this tick
+
         time.sleep(30)
