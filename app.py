@@ -204,9 +204,15 @@ def _engine_panel():
 
 # ── Tabs ──────────────────────────────────────────────────────────────────
 _pending_label = f"🔔 Approvals ({pending_count()})" if pending_count() else "🔔 Approvals"
-tab_engine, tab_approvals, tab_signals, tab_performance = st.tabs([
-    "🔧 Engine", _pending_label, "📊 Signals", "📈 Performance"
+tab_approvals, tab_engine, tab_signals, tab_performance = st.tabs([
+    _pending_label, "🔧 Engine", "📊 Signals", "📈 Performance"
 ])
+
+# Auto-refresh every 30 s — keeps P&L and pending count current without manual click
+st.markdown(
+    '<meta http-equiv="refresh" content="30">',
+    unsafe_allow_html=True,
+)
 
 # ══════════════════════════════════════════════════════════════════════════
 # TAB 1 — ENGINE CONTROL

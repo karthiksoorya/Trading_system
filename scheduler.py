@@ -276,6 +276,9 @@ def run():
         logger.error("Broker not connected. Run token refresh first.")
         return
 
+    import telegram_handler
+    telegram_handler.start_polling()
+
     schedule.every().day.at(config.SCAN_START).do(scan)
     schedule.every(5).minutes.do(scan)
     schedule.every(1).minutes.do(monitor_open_trades)

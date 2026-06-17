@@ -3,6 +3,7 @@ Telegram notifications for the trading system.
 Reads TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID from .env via config.
 """
 
+import json
 import logging
 import os
 
@@ -15,27 +16,41 @@ _CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
 _URL     = f"https://api.telegram.org/bot{_TOKEN}/sendMessage"
 
 
-def _send(text: str):
+def _send(text: str, reply_markup: dict | None = None) -> int | None:
     if not _TOKEN or not _CHAT_ID:
         logger.warning("Telegram not configured — skipping notification.")
-        return
+        return None
+    payload = {"chat_id": _CHAT_ID, "text": text, "parse_mode": "HTML"}
+    if reply_markup:
+        payload["reply_markup"] = json.dumps(reply_markup)
     try:
-        requests.post(_URL, json={"chat_id": _CHAT_ID, "text": text, "parse_mode": "HTML"}, timeout=5)
+        r = requests.post(_URL, json=payload, timeout=5)
+        result = r.json()
+        if result.get("ok"):
+            return result["result"]["message_id"]
     except Exception as e:
         logger.warning("Telegram send failed: %s", e)
+    return None
 
 
 def signal_detected(signal_id: int, zone_class: str, zone_type: str,
                     timeframe: str, entry: float, sl: float,
                     target: float, score: float, confluence: str):
-    emoji = "🟢" if zone_class == "demand" else "🔴"
-    _send(
-        f"{emoji} <b>New Signal #{signal_id}</b>\n"
-        f"Zone: {zone_class.upper()} {zone_type} | {timeframe}\n"
-        f"Entry: {entry:.2f} | SL: {sl:.2f} | Target: {target:.2f}\n"
-        f"Score: {score:.1f}/10 | Confluence: {confluence}\n"
-        f"👉 Open dashboard to Approve or Reject"
+    emoji     = "🟢" if zone_class == "demand" else "🔴"
+    direction = "LONG" if zone_class == "demand" else "SHORT"
+    text = (
+        f"{emoji} <b>Signal #{signal_id} — {direction}</b>\n"
+        f"{zone_type} | {timeframe}\n"
+        f"Entry: {entry:.2f} | SL: {sl:.2f} | TGT: {target:.2f}\n"
+        f"Score: {score:.1f}/10 | {confluence}"
     )
+    keyboard = {
+        "inline_keyboard": [[
+            {"text": "✅ Approve", "callback_data": f"approve_{signal_id}"},
+            {"text": "❌ Reject",  "callback_data": f"reject_{signal_id}"},
+        ]]
+    }
+    _send(text, reply_markup=keyboard)
 
 
 def trade_approved(signal_id: int, entry: float, sl: float, target: float):
