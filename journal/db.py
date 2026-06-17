@@ -1,6 +1,6 @@
 import sqlite3
 import logging
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from contextlib import contextmanager
 from typing import Optional
 
@@ -224,10 +224,10 @@ def get_signals_for_date(trade_date: Optional[str] = None) -> list[sqlite3.Row]:
 
 
 def trades_today() -> int:
-    """Count approved trades taken today (excludes pending and rejected)."""
+    """Count approved trades taken today (excludes pending, rejected, expired)."""
     with _conn() as con:
         row = con.execute(
-            "SELECT COUNT(*) FROM signals WHERE date=? AND status NOT IN ('pending', 'rejected')",
+            "SELECT COUNT(*) FROM signals WHERE date=? AND status NOT IN ('pending', 'rejected', 'expired')",
             (date.today().isoformat(),),
         ).fetchone()
         return row[0] if row else 0
@@ -275,6 +275,22 @@ def zone_signaled_today(zone_class: str, zone_type: str, timeframe: str, proxima
             (date.today().isoformat(), zone_class, zone_type, timeframe, proximal),
         ).fetchone()
         return row is not None
+
+
+def expire_old_pending(expiry_minutes: int) -> int:
+    """Auto-expire pending signals older than expiry_minutes. Returns count expired."""
+    cutoff = (datetime.now() - timedelta(minutes=expiry_minutes)).strftime("%Y-%m-%d %H:%M:%S")
+    with _conn() as con:
+        count = con.execute(
+            """UPDATE signals SET status = 'expired',
+                   notes = 'expired — zone no longer current'
+               WHERE status = 'pending'
+               AND (date || ' ' || time_signal) < ?""",
+            (cutoff,),
+        ).rowcount
+    if count:
+        logger.info("Expired %d pending signal(s) older than %d min.", count, expiry_minutes)
+    return count
 
 
 def get_open_trades() -> list[sqlite3.Row]:

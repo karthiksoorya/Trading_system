@@ -48,7 +48,8 @@ EXCITING_CANDLE_BODY_RATIO = 0.50   # body > 50% of range → exciting
 # Demand: SL = distal - SL_BUFFER_POINTS
 # Supply: SL = distal + SL_BUFFER_POINTS
 # Set to 0 for pure price action (SL exactly at distal).
-SL_BUFFER_POINTS = 5
+SL_BUFFER_POINTS       = 5
+SIGNAL_EXPIRY_MINUTES  = 45   # pending signals older than this are auto-expired
 
 # ── Kite API Credentials (set via environment variables) ──────────────────
 # Export in terminal: set KITE_API_KEY=xxx  /  set KITE_API_SECRET=xxx
@@ -93,6 +94,7 @@ def save_settings(overrides: dict):
     SETTINGS_FILE.write_text(json.dumps(current, indent=2))
 
 _s = load_settings()
-SL_BUFFER_POINTS  = _s.get("SL_BUFFER_POINTS",  SL_BUFFER_POINTS)
-SCAN_TIMEFRAMES   = _s.get("SCAN_TIMEFRAMES",   [TF_LOWER, TF_INTERMEDIATE, TF_HIGHER])
-SCAN_ZONE_CLASSES = _s.get("SCAN_ZONE_CLASSES", ["demand", "supply"])
+SL_BUFFER_POINTS      = _s.get("SL_BUFFER_POINTS",      SL_BUFFER_POINTS)
+SIGNAL_EXPIRY_MINUTES = _s.get("SIGNAL_EXPIRY_MINUTES", SIGNAL_EXPIRY_MINUTES)
+SCAN_TIMEFRAMES       = _s.get("SCAN_TIMEFRAMES",       [TF_LOWER, TF_INTERMEDIATE, TF_HIGHER])
+SCAN_ZONE_CLASSES     = _s.get("SCAN_ZONE_CLASSES",     ["demand", "supply"])

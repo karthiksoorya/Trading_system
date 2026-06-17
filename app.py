@@ -23,7 +23,7 @@ from journal.db import (
     init_db, close_trade, trades_today, daily_pnl,
     get_signals_for_date, get_pending_signals, pending_count,
     approve_signal, reject_signal, reject_all_pending, get_open_trades,
-    expire_stale_pending,
+    expire_stale_pending, expire_old_pending,
 )
 from journal.export import export_day
 from scheduler import is_market_open, get_last_trading_day
@@ -45,6 +45,7 @@ st.set_page_config(
 )
 init_db()
 expire_stale_pending()
+expire_old_pending(config.load_settings().get("SIGNAL_EXPIRY_MINUTES", config.SIGNAL_EXPIRY_MINUTES))
 
 # ── Engine helpers ────────────────────────────────────────────────────────
 
@@ -314,6 +315,14 @@ with tab_engine:
         help="Uncheck 'supply' to only trade demand zones (long bias), or vice versa.",
     )
 
+    expiry_minutes = st.slider(
+        "Signal Expiry Window (minutes)",
+        min_value=15, max_value=120,
+        value=_current.get("SIGNAL_EXPIRY_MINUTES", config.SIGNAL_EXPIRY_MINUTES),
+        step=5,
+        help="Pending signals older than this are auto-expired. Default 45 min.",
+    )
+
     if st.button("💾 Save Settings"):
         if not scan_tfs:
             st.error("Select at least one timeframe.")
@@ -321,12 +330,16 @@ with tab_engine:
             st.error("Select at least one zone class.")
         else:
             config.save_settings({
-                "SL_BUFFER_POINTS":  sl_buffer,
-                "ENTRY_TIMEFRAME":   entry_tf,
-                "SCAN_TIMEFRAMES":   scan_tfs,
-                "SCAN_ZONE_CLASSES": scan_classes,
+                "SL_BUFFER_POINTS":     sl_buffer,
+                "ENTRY_TIMEFRAME":      entry_tf,
+                "SCAN_TIMEFRAMES":      scan_tfs,
+                "SCAN_ZONE_CLASSES":    scan_classes,
+                "SIGNAL_EXPIRY_MINUTES": expiry_minutes,
             })
-            st.success(f"Saved — Entry TF: {entry_tf} | SL buffer: {sl_buffer} pts | Classes: {scan_classes}")
+            st.success(
+                f"Saved — Entry TF: {entry_tf} | SL buffer: {sl_buffer} pts | "
+                f"Expiry: {expiry_minutes} min | Classes: {scan_classes}"
+            )
 
 # ══════════════════════════════════════════════════════════════════════════
 # TAB 2 — APPROVALS

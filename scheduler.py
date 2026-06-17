@@ -24,7 +24,7 @@ from engine.confluence import check_confluence
 from engine.zones import detect_zones, update_zone_state
 from engine.signals import generate_signal
 from engine.position_size import calculate as size_trade
-from journal.db import init_db, log_signal, trades_today, daily_pnl, get_open_trades, close_trade, zone_signaled_today
+from journal.db import init_db, log_signal, trades_today, daily_pnl, get_open_trades, close_trade, zone_signaled_today, expire_old_pending
 from journal.export import export_day
 import notify
 
@@ -292,6 +292,10 @@ def run():
 
         now = datetime.now()
         hhmm = now.strftime("%H:%M")
+
+        # ── Expire stale pending signals ──────────────────────────────────
+        expiry_min = config.load_settings().get("SIGNAL_EXPIRY_MINUTES", config.SIGNAL_EXPIRY_MINUTES)
+        expire_old_pending(expiry_min)
 
         # ── Graceful stop via UI flag ─────────────────────────────────────
         if config.load_settings().get("engine_state") == "stopped":
