@@ -347,6 +347,39 @@ with tab_engine:
                 f"Expiry: {expiry_minutes} min | Classes: {scan_classes}"
             )
 
+    st.divider()
+
+    # ── Backup ────────────────────────────────────────────────────────────
+    st.subheader("5. Backup")
+    col_db, col_csv = st.columns(2)
+
+    with col_db:
+        if config.DB_PATH.exists():
+            with open(config.DB_PATH, "rb") as f:
+                col_db.download_button(
+                    label="⬇️ Download trades.db",
+                    data=f,
+                    file_name=f"trades_{date.today().isoformat()}.db",
+                    mime="application/octet-stream",
+                    use_container_width=True,
+                    help="Download the full trade database. Save to Google Drive or anywhere.",
+                )
+
+    with col_csv:
+        today_csv = config.CSV_DIR / f"{date.today().isoformat()}.csv"
+        if today_csv.exists():
+            with open(today_csv, "rb") as f:
+                col_csv.download_button(
+                    label="⬇️ Download Today's CSV",
+                    data=f,
+                    file_name=today_csv.name,
+                    mime="text/csv",
+                    use_container_width=True,
+                )
+        else:
+            col_csv.button("⬇️ Download Today's CSV", disabled=True,
+                           use_container_width=True, help="No CSV yet for today.")
+
 # ══════════════════════════════════════════════════════════════════════════
 # TAB 2 — APPROVALS
 # ══════════════════════════════════════════════════════════════════════════
