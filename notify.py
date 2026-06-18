@@ -36,10 +36,12 @@ def _send(text: str, reply_markup: dict | None = None) -> int | None:
 def signal_detected(signal_id: int, zone_class: str, zone_type: str,
                     timeframe: str, entry: float, sl: float,
                     target: float, score: float, confluence: str):
+    from datetime import datetime
     emoji     = "🟢" if zone_class == "demand" else "🔴"
     direction = "LONG" if zone_class == "demand" else "SHORT"
+    now       = datetime.now().strftime("%H:%M:%S")
     text = (
-        f"{emoji} <b>Signal #{signal_id} — {direction}</b>\n"
+        f"{emoji} <b>Signal #{signal_id} — {direction}</b>  🕐 {now}\n"
         f"{zone_type} | {timeframe}\n"
         f"Entry: {entry:.2f} | SL: {sl:.2f} | TGT: {target:.2f}\n"
         f"Score: {score:.1f}/10 | {confluence}"
