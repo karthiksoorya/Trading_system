@@ -25,6 +25,7 @@ CAPITAL              = 10_000   # ₹
 MAX_RISK_PCT         = 0.01     # 1% of capital per day → ₹100
 MAX_TRADES_PER_DAY   = 4
 MIN_BOOSTER_SCORE    = 8        # Score < 8 → no trade
+MIN_CONFLUENCE       = 1        # minimum TFs in agreement to generate signal
 
 # ── Instruments ────────────────────────────────────────────────────────────
 NIFTY_SYMBOL = "NSE:NIFTY 50"
@@ -96,5 +97,7 @@ def save_settings(overrides: dict):
 _s = load_settings()
 SL_BUFFER_POINTS      = _s.get("SL_BUFFER_POINTS",      SL_BUFFER_POINTS)
 SIGNAL_EXPIRY_MINUTES = _s.get("SIGNAL_EXPIRY_MINUTES", SIGNAL_EXPIRY_MINUTES)
+MIN_BOOSTER_SCORE     = _s.get("MIN_BOOSTER_SCORE",     MIN_BOOSTER_SCORE)
+MIN_CONFLUENCE        = _s.get("MIN_CONFLUENCE",         MIN_CONFLUENCE)
 SCAN_TIMEFRAMES       = _s.get("SCAN_TIMEFRAMES",       [TF_LOWER, TF_INTERMEDIATE, TF_HIGHER])
 SCAN_ZONE_CLASSES     = _s.get("SCAN_ZONE_CLASSES",     ["demand", "supply"])

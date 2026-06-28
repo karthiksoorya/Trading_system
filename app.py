@@ -329,6 +329,22 @@ with tab_engine:
         help="Pending signals older than this are auto-expired. Default 45 min.",
     )
 
+    col_score, col_conf = st.columns(2)
+    min_score = col_score.slider(
+        "Min Booster Score",
+        min_value=8, max_value=10,
+        value=_current.get("MIN_BOOSTER_SCORE", config.MIN_BOOSTER_SCORE),
+        step=1,
+        help="8 = standard, 9 = good setups only, 10 = perfect setups only.",
+    )
+    min_conf = col_conf.slider(
+        "Min Confluence (TFs)",
+        min_value=1, max_value=3,
+        value=_current.get("MIN_CONFLUENCE", config.MIN_CONFLUENCE),
+        step=1,
+        help="1 = any signal, 2 = confirmed by 2 TFs, 3 = all 3 TFs agree.",
+    )
+
     if st.button("💾 Save Settings"):
         if not scan_tfs:
             st.error("Select at least one timeframe.")
@@ -336,15 +352,17 @@ with tab_engine:
             st.error("Select at least one zone class.")
         else:
             config.save_settings({
-                "SL_BUFFER_POINTS":     sl_buffer,
-                "ENTRY_TIMEFRAME":      entry_tf,
-                "SCAN_TIMEFRAMES":      scan_tfs,
-                "SCAN_ZONE_CLASSES":    scan_classes,
+                "SL_BUFFER_POINTS":      sl_buffer,
+                "ENTRY_TIMEFRAME":       entry_tf,
+                "SCAN_TIMEFRAMES":       scan_tfs,
+                "SCAN_ZONE_CLASSES":     scan_classes,
                 "SIGNAL_EXPIRY_MINUTES": expiry_minutes,
+                "MIN_BOOSTER_SCORE":     min_score,
+                "MIN_CONFLUENCE":        min_conf,
             })
             st.success(
-                f"Saved — Entry TF: {entry_tf} | SL buffer: {sl_buffer} pts | "
-                f"Expiry: {expiry_minutes} min | Classes: {scan_classes}"
+                f"Saved — TF: {entry_tf} | Score ≥ {min_score} | "
+                f"Confluence ≥ {min_conf} TF | Expiry: {expiry_minutes} min"
             )
 
     st.divider()

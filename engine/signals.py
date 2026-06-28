@@ -90,7 +90,8 @@ def generate_signal(
         overnight_target=overnight_target,
     )
 
-    if boosters.total < config.MIN_BOOSTER_SCORE:
+    min_score = config.load_settings().get("MIN_BOOSTER_SCORE", config.MIN_BOOSTER_SCORE)
+    if boosters.total < min_score:
         return None
 
     if confluence is None:

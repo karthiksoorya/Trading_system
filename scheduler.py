@@ -104,8 +104,10 @@ def _scan_core():
     logger.info("LTP: %.2f", ltp)
 
     # Active filters (re-read each scan so UI changes apply immediately)
-    active_tfs     = config.load_settings().get("SCAN_TIMEFRAMES",   _TF_ORDER)
-    active_classes = set(config.load_settings().get("SCAN_ZONE_CLASSES", ["demand", "supply"]))
+    _s             = config.load_settings()
+    active_tfs     = _s.get("SCAN_TIMEFRAMES",   _TF_ORDER)
+    active_classes = set(_s.get("SCAN_ZONE_CLASSES", ["demand", "supply"]))
+    min_confluence = _s.get("MIN_CONFLUENCE", config.MIN_CONFLUENCE)
 
     # ── Step 1: collect valid zones for every TF ──────────────────────────
     valid_zones: dict[str, list] = {}
@@ -170,6 +172,12 @@ def _scan_core():
                 confluence=confluence,
             )
             if signal is None:
+                continue
+            if signal.confluence.count < min_confluence:
+                logger.info(
+                    "[%s] Skipped — confluence %d < min %d required",
+                    tf, signal.confluence.count, min_confluence,
+                )
                 continue
 
             data = {**signal.as_dict(), "position_size": sizing["position_size"], "date": trade_date}
