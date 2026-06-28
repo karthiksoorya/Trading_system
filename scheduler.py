@@ -346,6 +346,14 @@ def end_of_day():
     notify.eod_summary(trades=len(closed), wins=wins, losses=losses, total_pnl=pnl)
 
 
+def _backup_job():
+    try:
+        import backup
+        backup.run_backup()
+    except Exception as e:
+        logger.warning("Backup job error: %s", e)
+
+
 def run():
     init_db()
     logger.info("Trading engine starting | mode=%s | broker=%s", config.MODE, config.BROKER)
@@ -361,7 +369,8 @@ def run():
     schedule.every(5).minutes.do(scan)
     schedule.every(1).minutes.do(monitor_open_trades)
     schedule.every(1).minutes.do(check_pending_freshness)
-    schedule.every().day.at("15:20").do(end_of_day)   # 10 min before close
+    schedule.every().day.at("15:20").do(end_of_day)    # 10 min before close
+    schedule.every().day.at("15:45").do(_backup_job)   # after EOD close
 
     logger.info("Scheduler running. Waiting for %s...", config.SCAN_START)
 

@@ -409,6 +409,31 @@ with tab_engine:
             col_csv.button("⬇️ Download Today's CSV", disabled=True,
                            use_container_width=True, help="No CSV yet for today.")
 
+    st.markdown("**☁️ Google Drive Auto-backup**")
+    from pathlib import Path as _Path
+    _token_exists = (_Path(config.BASE_DIR) / "gdrive_token.json").exists()
+
+    if _token_exists:
+        if st.button("☁️ Backup to Drive Now", use_container_width=True,
+                     help="Upload trades.db to your Google Drive folder immediately."):
+            with st.spinner("Uploading to Google Drive..."):
+                try:
+                    import backup as _backup
+                    ok = _backup.run_backup()
+                    if ok:
+                        st.success("✅ Backup uploaded to Google Drive.")
+                    else:
+                        st.error("❌ Backup failed — check logs/backup.log for details.")
+                except Exception as e:
+                    st.error(f"❌ Error: {e}")
+        st.caption("Auto-backup also runs daily at 15:45 IST after market close.")
+    else:
+        st.warning(
+            "Google Drive not connected. To enable:\n"
+            "1. Run `python backup.py --auth` on your local machine\n"
+            "2. SCP the generated `gdrive_token.json` to the VPS"
+        )
+
 # ══════════════════════════════════════════════════════════════════════════
 # TAB 2 — APPROVALS
 # ══════════════════════════════════════════════════════════════════════════

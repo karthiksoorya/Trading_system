@@ -183,5 +183,8 @@ cython_debug/
 
 # Trading system — local data only
 data/
+logs/
 docs/credentials.txt
 .engine.pid
+gdrive_credentials.json
+gdrive_token.json

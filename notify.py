@@ -84,6 +84,13 @@ def trade_closed(signal_id: int, exit_price: float, reason: str, pnl: float):
     )
 
 
+def backup_result(success: bool, message: str):
+    if success:
+        _send(f"☁️ <b>Backup OK</b>\n{message}")
+    else:
+        _send(f"❌ <b>Backup Failed</b>\n{message}")
+
+
 def eod_summary(trades: int, wins: int, losses: int, total_pnl: float):
     pnl_str = f"+{total_pnl:.2f}" if total_pnl >= 0 else f"{total_pnl:.2f}"
     emoji = "📈" if total_pnl >= 0 else "📉"
