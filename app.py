@@ -671,21 +671,100 @@ with tab_performance:
 
             # ── Breakdown ─────────────────────────────────────────────────
             st.subheader("Breakdown")
+
+            def _wr_style(val):
+                if isinstance(val, float):
+                    if val >= 50:  return "color: #2ecc71; font-weight: bold"
+                    if val < 35:   return "color: #e74c3c; font-weight: bold"
+                return ""
+
             col_left, col_right = st.columns(2)
 
             with col_left:
                 st.caption("By Zone Type")
                 zone_df = all_df.groupby("zone_type")["pnl_points"].agg(
-                    Trades="count", Total_PnL="sum", Win_Rate=lambda x: (x > 0).mean() * 100
-                ).reset_index()
-                st.dataframe(zone_df, use_container_width=True, hide_index=True)
+                    Trades="count", Total_PnL="sum",
+                    Win_Rate=lambda x: round((x > 0).mean() * 100, 1)
+                ).reset_index().sort_values("Win_Rate", ascending=False)
+                st.dataframe(
+                    zone_df.style.map(_wr_style, subset=["Win_Rate"]),
+                    use_container_width=True, hide_index=True,
+                )
 
             with col_right:
                 st.caption("By Timeframe")
                 tf_df = all_df.groupby("timeframe")["pnl_points"].agg(
-                    Trades="count", Total_PnL="sum", Win_Rate=lambda x: (x > 0).mean() * 100
-                ).reset_index()
-                st.dataframe(tf_df, use_container_width=True, hide_index=True)
+                    Trades="count", Total_PnL="sum",
+                    Win_Rate=lambda x: round((x > 0).mean() * 100, 1)
+                ).reset_index().sort_values("Win_Rate", ascending=False)
+                st.dataframe(
+                    tf_df.style.map(_wr_style, subset=["Win_Rate"]),
+                    use_container_width=True, hide_index=True,
+                )
+
+            st.caption("By Zone Class")
+            class_df = all_df.groupby("zone_class")["pnl_points"].agg(
+                Trades="count", Total_PnL="sum",
+                Win_Rate=lambda x: round((x > 0).mean() * 100, 1)
+            ).reset_index().sort_values("Win_Rate", ascending=False)
+            st.dataframe(
+                class_df.style.map(_wr_style, subset=["Win_Rate"]),
+                use_container_width=True, hide_index=True,
+            )
+
+            st.divider()
+
+            # ── System Recommendation ──────────────────────────────────────
+            st.subheader("System Recommendation")
+            MIN_TRADES_FOR_REC = 3
+
+            good_zone_types  = zone_df.loc[
+                (zone_df["Win_Rate"] >= 50) & (zone_df["Trades"] >= MIN_TRADES_FOR_REC),
+                "zone_type"
+            ].tolist()
+            weak_zone_types  = zone_df.loc[
+                (zone_df["Win_Rate"] < 35)  & (zone_df["Trades"] >= MIN_TRADES_FOR_REC),
+                "zone_type"
+            ].tolist()
+            good_tfs = tf_df.loc[
+                (tf_df["Win_Rate"] >= 50) & (tf_df["Trades"] >= MIN_TRADES_FOR_REC),
+                "timeframe"
+            ].tolist()
+            good_classes = class_df.loc[
+                (class_df["Win_Rate"] >= 50) & (class_df["Trades"] >= MIN_TRADES_FOR_REC),
+                "zone_class"
+            ].tolist()
+
+            if total < MIN_TRADES_FOR_REC:
+                st.info(
+                    f"Need at least {MIN_TRADES_FOR_REC} closed trades for recommendations "
+                    f"({total} so far). Keep trading!"
+                )
+            else:
+                rec_lines = []
+                if good_tfs:
+                    rec_lines.append(f"- **Timeframe:** {' / '.join(good_tfs)}")
+                if good_classes:
+                    rec_lines.append(f"- **Zone class:** {' + '.join(good_classes)} only")
+                if good_zone_types:
+                    rec_lines.append(f"- **Zone types:** {', '.join(good_zone_types)}")
+
+                if rec_lines:
+                    st.success(
+                        "Based on your trade history, the system recommends:\n\n"
+                        + "\n".join(rec_lines)
+                    )
+                else:
+                    st.info("No zone type or timeframe has reached ≥50% win rate yet. "
+                            "More data needed — keep trading.")
+
+                for zt in weak_zone_types:
+                    wr = zone_df.loc[zone_df["zone_type"] == zt, "Win_Rate"].values[0]
+                    n  = zone_df.loc[zone_df["zone_type"] == zt, "Trades"].values[0]
+                    st.warning(
+                        f"⚠️ **{zt}** has {wr:.0f}% win rate over {n} trades — "
+                        f"consider disabling in Settings → Zone Classes."
+                    )
 
             st.divider()
 
