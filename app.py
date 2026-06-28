@@ -329,6 +329,15 @@ with tab_engine:
         help="Pending signals older than this are auto-expired. Default 45 min.",
     )
 
+    zone_approach = st.slider(
+        "Zone Approach Distance (points)",
+        min_value=10, max_value=200,
+        value=_current.get("ZONE_APPROACH_POINTS", config.ZONE_APPROACH_POINTS),
+        step=5,
+        help="Signal only fires if LTP is within this many points of the zone proximal. "
+             "50 = only near zones. Increase if you miss too many signals.",
+    )
+
     col_score, col_conf = st.columns(2)
     min_score = col_score.slider(
         "Min Booster Score",
@@ -357,12 +366,14 @@ with tab_engine:
                 "SCAN_TIMEFRAMES":       scan_tfs,
                 "SCAN_ZONE_CLASSES":     scan_classes,
                 "SIGNAL_EXPIRY_MINUTES": expiry_minutes,
+                "ZONE_APPROACH_POINTS":  zone_approach,
                 "MIN_BOOSTER_SCORE":     min_score,
                 "MIN_CONFLUENCE":        min_conf,
             })
             st.success(
                 f"Saved — TF: {entry_tf} | Score ≥ {min_score} | "
-                f"Confluence ≥ {min_conf} TF | Expiry: {expiry_minutes} min"
+                f"Confluence ≥ {min_conf} TF | Approach ≤ {zone_approach} pts | "
+                f"Expiry: {expiry_minutes} min"
             )
 
     st.divider()

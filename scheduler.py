@@ -104,10 +104,11 @@ def _scan_core():
     logger.info("LTP: %.2f", ltp)
 
     # Active filters (re-read each scan so UI changes apply immediately)
-    _s             = config.load_settings()
-    active_tfs     = _s.get("SCAN_TIMEFRAMES",   _TF_ORDER)
-    active_classes = set(_s.get("SCAN_ZONE_CLASSES", ["demand", "supply"]))
-    min_confluence = _s.get("MIN_CONFLUENCE", config.MIN_CONFLUENCE)
+    _s               = config.load_settings()
+    active_tfs       = _s.get("SCAN_TIMEFRAMES",     _TF_ORDER)
+    active_classes   = set(_s.get("SCAN_ZONE_CLASSES", ["demand", "supply"]))
+    min_confluence   = _s.get("MIN_CONFLUENCE",       config.MIN_CONFLUENCE)
+    zone_approach_pts = _s.get("ZONE_APPROACH_POINTS", config.ZONE_APPROACH_POINTS)
 
     # ── Step 1: collect valid zones for every TF ──────────────────────────
     valid_zones: dict[str, list] = {}
@@ -159,6 +160,45 @@ def _scan_core():
             # Skip if this exact zone already signaled today
             if zone_signaled_today(zone.zone_class, zone.zone_type, tf, zone.proximal):
                 continue
+
+            # ── Filter 1: Price proximity ─────────────────────────────────
+            dist = abs(ltp - zone.proximal)
+            if dist > zone_approach_pts:
+                logger.debug(
+                    "[%s] Skipped — LTP %.2f is %.0f pts from proximal (max %d)",
+                    tf, ltp, dist, zone_approach_pts,
+                )
+                continue
+
+            # ── Filter 2: Zone validity (no close beyond distal last 3 bars)
+            recent_3 = candles[-4:-1]
+            if zone.zone_class == "demand":
+                if any(c.close < zone.distal for c in recent_3):
+                    logger.info("[%s] Skipped — demand zone violated (close < distal %.2f)", tf, zone.distal)
+                    continue
+            else:
+                if any(c.close > zone.distal for c in recent_3):
+                    logger.info("[%s] Skipped — supply zone violated (close > distal %.2f)", tf, zone.distal)
+                    continue
+
+            # ── Filter 3: 60min trend alignment ──────────────────────────
+            candles_60 = recent_candles.get(config.TF_HIGHER, [])
+            if len(candles_60) >= 6 and entry_tf != config.TF_HIGHER:
+                trend_now  = candles_60[-2].close   # last complete 60min candle
+                trend_prev = candles_60[-6].close   # 4 bars earlier
+                if trend_now > trend_prev * 1.002:
+                    trend_60 = "up"
+                elif trend_now < trend_prev * 0.998:
+                    trend_60 = "down"
+                else:
+                    trend_60 = "neutral"
+                if zone.zone_class == "demand" and trend_60 == "down":
+                    logger.info("[%s] Skipped — demand zone but 60min trend is DOWN", tf)
+                    continue
+                if zone.zone_class == "supply" and trend_60 == "up":
+                    logger.info("[%s] Skipped — supply zone but 60min trend is UP", tf)
+                    continue
+
             sizing = size_trade(zone.proximal, zone.distal, trades_today())
             if sizing.get("error"):
                 continue
@@ -248,6 +288,36 @@ def monitor_open_trades():
                 notify.trade_closed(tid, stop_loss, "stoploss", pnl)
 
 
+def check_pending_freshness():
+    """Filter 4: auto-expire pending signals where price has already touched the proximal.
+    If price enters the zone while signal is still waiting for approval, the entry is missed."""
+    from journal.db import get_pending_signals, expire_signal as _expire
+    pending = get_pending_signals()
+    if not pending:
+        return
+    try:
+        ltp = broker.get_ltp(config.NIFTY_SYMBOL)
+    except Exception as e:
+        logger.debug("check_pending_freshness: LTP fetch failed — %s", e)
+        return
+
+    for row in pending:
+        t          = dict(row)
+        proximal   = t["proximal"]
+        zone_class = t["zone_class"]
+        sig_id     = t["id"]
+        touched = (
+            (zone_class == "demand" and ltp <= proximal) or
+            (zone_class == "supply" and ltp >= proximal)
+        )
+        if touched:
+            _expire(sig_id, f"touched while pending — LTP {ltp:.2f} crossed proximal {proximal:.2f}")
+            logger.info(
+                "Auto-expired pending #%d — LTP %.2f touched proximal %.2f while awaiting approval",
+                sig_id, ltp, proximal,
+            )
+
+
 def end_of_day():
     """Close any still-open trades at EOD price, then export the day's CSV."""
     open_trades = get_open_trades()
@@ -290,6 +360,7 @@ def run():
     schedule.every().day.at(config.SCAN_START).do(scan)
     schedule.every(5).minutes.do(scan)
     schedule.every(1).minutes.do(monitor_open_trades)
+    schedule.every(1).minutes.do(check_pending_freshness)
     schedule.every().day.at("15:20").do(end_of_day)   # 10 min before close
 
     logger.info("Scheduler running. Waiting for %s...", config.SCAN_START)

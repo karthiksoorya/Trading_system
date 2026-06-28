@@ -51,6 +51,7 @@ EXCITING_CANDLE_BODY_RATIO = 0.50   # body > 50% of range → exciting
 # Set to 0 for pure price action (SL exactly at distal).
 SL_BUFFER_POINTS       = 5
 SIGNAL_EXPIRY_MINUTES  = 45   # pending signals older than this are auto-expired
+ZONE_APPROACH_POINTS   = 50   # LTP must be within this many pts of proximal
 
 # ── Kite API Credentials (set via environment variables) ──────────────────
 # Export in terminal: set KITE_API_KEY=xxx  /  set KITE_API_SECRET=xxx
@@ -99,5 +100,6 @@ SL_BUFFER_POINTS      = _s.get("SL_BUFFER_POINTS",      SL_BUFFER_POINTS)
 SIGNAL_EXPIRY_MINUTES = _s.get("SIGNAL_EXPIRY_MINUTES", SIGNAL_EXPIRY_MINUTES)
 MIN_BOOSTER_SCORE     = _s.get("MIN_BOOSTER_SCORE",     MIN_BOOSTER_SCORE)
 MIN_CONFLUENCE        = _s.get("MIN_CONFLUENCE",         MIN_CONFLUENCE)
+ZONE_APPROACH_POINTS  = _s.get("ZONE_APPROACH_POINTS",  ZONE_APPROACH_POINTS)
 SCAN_TIMEFRAMES       = _s.get("SCAN_TIMEFRAMES",       [TF_LOWER, TF_INTERMEDIATE, TF_HIGHER])
 SCAN_ZONE_CLASSES     = _s.get("SCAN_ZONE_CLASSES",     ["demand", "supply"])

@@ -277,6 +277,16 @@ def zone_signaled_today(zone_class: str, zone_type: str, timeframe: str, proxima
         return row is not None
 
 
+def expire_signal(signal_id: int, note: str) -> None:
+    """Expire a single pending signal with a custom reason note."""
+    with _conn() as con:
+        con.execute(
+            "UPDATE signals SET status='expired', notes=? WHERE id=? AND status='pending'",
+            (note, signal_id),
+        )
+    logger.info("Signal #%d auto-expired: %s", signal_id, note)
+
+
 def expire_old_pending(expiry_minutes: int) -> int:
     """Auto-expire pending signals older than expiry_minutes. Returns count expired."""
     cutoff = (datetime.now() - timedelta(minutes=expiry_minutes)).strftime("%Y-%m-%d %H:%M:%S")
