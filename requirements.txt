@@ -4,8 +4,3 @@ schedule
 requests
 python-dotenv
 kiteconnect
-
-# Google Drive backup
-google-api-python-client
-google-auth-oauthlib
-google-auth-httplib2
