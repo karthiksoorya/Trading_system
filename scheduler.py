@@ -104,11 +104,12 @@ def _scan_core():
     logger.info("LTP: %.2f", ltp)
 
     # Active filters (re-read each scan so UI changes apply immediately)
-    _s               = config.load_settings()
-    active_tfs       = _s.get("SCAN_TIMEFRAMES",     _TF_ORDER)
-    active_classes   = set(_s.get("SCAN_ZONE_CLASSES", ["demand", "supply"]))
-    min_confluence   = _s.get("MIN_CONFLUENCE",       config.MIN_CONFLUENCE)
-    zone_approach_pts = _s.get("ZONE_APPROACH_POINTS", config.ZONE_APPROACH_POINTS)
+    _s                  = config.load_settings()
+    active_tfs          = _s.get("SCAN_TIMEFRAMES",      _TF_ORDER)
+    active_classes      = set(_s.get("SCAN_ZONE_CLASSES",  ["demand", "supply"]))
+    min_confluence      = _s.get("MIN_CONFLUENCE",         config.MIN_CONFLUENCE)
+    zone_approach_pts   = _s.get("ZONE_APPROACH_POINTS",   config.ZONE_APPROACH_POINTS)
+    disabled_zone_types = set(_s.get("DISABLED_ZONE_TYPES", []))
 
     # ── Step 1: collect valid zones for every TF ──────────────────────────
     valid_zones: dict[str, list] = {}
@@ -159,6 +160,11 @@ def _scan_core():
 
             # Skip if this exact zone already signaled today
             if zone_signaled_today(zone.zone_class, zone.zone_type, tf, zone.proximal):
+                continue
+
+            # Skip auto-disabled zone types (self-learning)
+            if zone.zone_type in disabled_zone_types:
+                logger.debug("[%s] Skipped — %s auto-disabled by learning engine", tf, zone.zone_type)
                 continue
 
             # ── Filter 1: Price proximity ─────────────────────────────────
@@ -264,28 +270,40 @@ def monitor_open_trades():
         stop_loss  = t["stop_loss"]
         target     = t["intraday_target"]
 
+        closed = False
         if zone_class == "demand":          # expecting price to rise
             if ltp >= target:
                 pnl = round(target - t["entry"], 2)
                 close_trade(tid, target, "target")
                 logger.info("AUTO-EXIT #%d TARGET hit at %.2f (LTP %.2f)", tid, target, ltp)
                 notify.trade_closed(tid, target, "target", pnl)
+                closed = True
             elif ltp <= stop_loss:
                 pnl = round(stop_loss - t["entry"], 2)
                 close_trade(tid, stop_loss, "stoploss")
                 logger.info("AUTO-EXIT #%d STOPLOSS hit at %.2f (LTP %.2f)", tid, stop_loss, ltp)
                 notify.trade_closed(tid, stop_loss, "stoploss", pnl)
+                closed = True
         else:                               # supply — expecting price to fall
             if ltp <= target:
                 pnl = round(t["entry"] - target, 2)
                 close_trade(tid, target, "target")
                 logger.info("AUTO-EXIT #%d TARGET hit at %.2f (LTP %.2f)", tid, target, ltp)
                 notify.trade_closed(tid, target, "target", pnl)
+                closed = True
             elif ltp >= stop_loss:
                 pnl = round(t["entry"] - stop_loss, 2)
                 close_trade(tid, stop_loss, "stoploss")
                 logger.info("AUTO-EXIT #%d STOPLOSS hit at %.2f (LTP %.2f)", tid, stop_loss, ltp)
                 notify.trade_closed(tid, stop_loss, "stoploss", pnl)
+                closed = True
+
+        if closed:
+            try:
+                import autolearn
+                autolearn.check_and_learn()
+            except Exception as e:
+                logger.debug("autolearn error: %s", e)
 
 
 def check_pending_freshness():

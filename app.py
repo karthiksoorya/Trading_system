@@ -783,6 +783,43 @@ with tab_performance:
 
             st.divider()
 
+            # ── Auto-Learn Status ─────────────────────────────────────────
+            st.subheader("Auto-Learn Status")
+            _al_settings         = config.load_settings()
+            _disabled_zt         = _al_settings.get("DISABLED_ZONE_TYPES", [])
+            _all_tfs             = [config.TF_LOWER, config.TF_INTERMEDIATE, config.TF_HIGHER]
+            _active_tfs          = _al_settings.get("SCAN_TIMEFRAMES", _all_tfs)
+            _disabled_tfs        = [tf for tf in _all_tfs if tf not in _active_tfs]
+
+            if not _disabled_zt and not _disabled_tfs:
+                st.info("Nothing auto-disabled yet. System will analyse after every 10 closed trades.")
+            else:
+                st.warning(
+                    "The learning engine has auto-disabled the following underperformers "
+                    "(win rate < 35% over 10+ trades):"
+                )
+                for zt in _disabled_zt:
+                    c1, c2 = st.columns([3, 1])
+                    c1.markdown(f"❌ Zone type **{zt}** (auto-disabled)")
+                    if c2.button(f"Re-enable {zt}", key=f"reenable_zt_{zt}"):
+                        _new_disabled = [z for z in _disabled_zt if z != zt]
+                        config.save_settings({"DISABLED_ZONE_TYPES": _new_disabled})
+                        st.success(f"{zt} re-enabled.")
+                        st.rerun()
+
+                for tf in _disabled_tfs:
+                    c1, c2 = st.columns([3, 1])
+                    c1.markdown(f"❌ Timeframe **{tf}** (auto-disabled)")
+                    if c2.button(f"Re-enable {tf}", key=f"reenable_tf_{tf}"):
+                        _new_tfs = _active_tfs + [tf]
+                        config.save_settings({"SCAN_TIMEFRAMES": _new_tfs})
+                        st.success(f"{tf} re-enabled.")
+                        st.rerun()
+
+                st.caption("Re-enabling restores the item to the scan. Monitor results carefully.")
+
+            st.divider()
+
             # ── Validation checklist ──────────────────────────────────────
             st.subheader("Validation Checklist (before going live)")
             avg_pnl = all_df["pnl_points"].mean()

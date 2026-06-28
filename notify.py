@@ -84,6 +84,10 @@ def trade_closed(signal_id: int, exit_price: float, reason: str, pnl: float):
     )
 
 
+def autolearn_alert(message: str):
+    _send(f"🤖 <b>Auto-Learn</b>\n{message}\n\nRe-enable via Performance tab if market conditions change.")
+
+
 def backup_result(success: bool, message: str):
     if success:
         _send(f"☁️ <b>Backup OK</b>\n{message}")
