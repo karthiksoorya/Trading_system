@@ -208,11 +208,6 @@ tab_approvals, tab_engine, tab_signals, tab_performance = st.tabs([
     _pending_label, "🔧 Engine", "📊 Signals", "📈 Performance"
 ])
 
-# Auto-refresh every 30 s — keeps P&L and pending count current without manual click
-st.markdown(
-    '<meta http-equiv="refresh" content="30">',
-    unsafe_allow_html=True,
-)
 
 # ══════════════════════════════════════════════════════════════════════════
 # TAB 1 — ENGINE CONTROL
@@ -425,10 +420,11 @@ with tab_engine:
     st.caption("Auto-backup also runs daily at 15:45 IST after market close.")
 
 # ══════════════════════════════════════════════════════════════════════════
-# TAB 2 — APPROVALS
+# TAB 2 — APPROVALS  (auto-refreshes every 30s without changing active tab)
 # ══════════════════════════════════════════════════════════════════════════
-with tab_approvals:
 
+@st.fragment(run_every=30)
+def _approvals_tab():
     # ── Open Trades — Live P&L ────────────────────────────────────────────
     open_trades = get_open_trades()
     if open_trades:
@@ -443,10 +439,9 @@ with tab_approvals:
             zone_class = t["zone_class"]
 
             if ltp is not None:
-                unreal = (ltp - entry) if zone_class == "demand" else (entry - ltp)
+                unreal    = (ltp - entry) if zone_class == "demand" else (entry - ltp)
                 to_target = abs(target - ltp)
                 to_sl     = abs(ltp - sl)
-                pnl_color = "🟢" if unreal >= 0 else "🔴"
             else:
                 unreal = to_target = to_sl = None
 
@@ -465,8 +460,7 @@ with tab_approvals:
                 c5.metric("To SL",     f"{to_sl:.1f} pts"     if to_sl     is not None else "—")
 
         if ltp is None:
-            st.warning("Could not fetch live LTP — token may be expired. P&L shown as — ")
-        st.caption("P&L updates on each page refresh. Click **🔄 Refresh page** in the sidebar.")
+            st.warning("Could not fetch live LTP — token may be expired.")
         st.divider()
 
     # ── Pending Approvals ─────────────────────────────────────────────────
@@ -496,14 +490,13 @@ with tab_approvals:
         st.divider()
 
     if not pending_rows:
-        st.success("No pending signals — all caught up.")
+        st.success("✅ No pending signals — all caught up.")
     elif open_trades:
-        # Block approvals while a trade is already active
         st.warning(
             f"⚠️ Trade #{open_trades[0]['id']} is still active. "
-            "Wait for it to close (target / SL) before approving a new one."
+            "Wait for it to close before approving a new one."
         )
-        st.info(f"{len(pending_rows)} signal(s) are queued and will be available once the active trade closes.")
+        st.info(f"{len(pending_rows)} signal(s) queued — available once active trade closes.")
     else:
         for row in pending_rows:
             r = dict(row)
@@ -516,11 +509,11 @@ with tab_approvals:
                 st.subheader(f"Signal #{r['id']} — {zone_label} | {r['timeframe']}")
 
                 m1, m2, m3, m4, m5 = st.columns(5)
-                m1.metric("Entry",    f"{r['entry']:.2f}")
+                m1.metric("Entry",     f"{r['entry']:.2f}")
                 m2.metric("Stop Loss", f"{r['stop_loss']:.2f}")
-                m3.metric("Target",   f"{r['intraday_target']:.2f}")
-                m4.metric("Score",    f"{r['booster_score']:.1f}/10")
-                m5.metric("Type",     f"Type {r['entry_type']}")
+                m3.metric("Target",    f"{r['intraday_target']:.2f}")
+                m4.metric("Score",     f"{r['booster_score']:.1f}/10")
+                m5.metric("Type",      f"Type {r['entry_type']}")
 
                 risk_pts = abs(r["entry"] - r["stop_loss"])
                 rr = abs(r["intraday_target"] - r["entry"]) / risk_pts if risk_pts else 0
@@ -541,6 +534,10 @@ with tab_approvals:
                     reject_signal(r["id"])
                     st.toast(f"Signal #{r['id']} rejected.", icon="❌")
                     st.rerun()
+
+
+with tab_approvals:
+    _approvals_tab()
 
 # ══════════════════════════════════════════════════════════════════════════
 # TAB 3 — SIGNALS
