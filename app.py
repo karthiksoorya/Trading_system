@@ -656,6 +656,33 @@ def _approvals_tab():
                 c4.metric("To Target", f"{to_target:.1f} pts" if to_target is not None else "—")
                 c5.metric("To SL",     f"{to_sl:.1f} pts"     if to_sl     is not None else "—")
 
+                # ── Manual close ──────────────────────────────────────────
+                _confirm_key = f"_confirm_close_{t['id']}"
+                if st.session_state.get(_confirm_key):
+                    st.warning("⚠️ Confirm manual close — this will exit the trade at current LTP.")
+                    if config.load_settings().get("MODE") == "live":
+                        st.error("🔴 LIVE MODE — also close your position manually on Kite app.")
+                    _ca, _cb, _cc = st.columns([1, 1, 2])
+                    if _ca.button("✅ Yes, close now", type="primary",
+                                  use_container_width=True, key=f"close_yes_{t['id']}"):
+                        _exit = ltp or entry
+                        _pnl  = round((_exit - entry if zone_class == "demand" else entry - _exit), 2)
+                        close_trade(t["id"], _exit, "manual")
+                        import notify as _n
+                        _n.trade_closed(t["id"], _exit, "manual", _pnl)
+                        st.session_state.pop(_confirm_key, None)
+                        st.toast(f"Trade #{t['id']} closed manually at {_exit:.2f}", icon="✅")
+                        st.rerun()
+                    if _cb.button("Cancel", use_container_width=True, key=f"close_no_{t['id']}"):
+                        st.session_state.pop(_confirm_key, None)
+                        st.rerun()
+                else:
+                    if st.button("🚨 Close Trade Now", use_container_width=True,
+                                 key=f"close_btn_{t['id']}",
+                                 help="Manually exit this trade at current LTP"):
+                        st.session_state[_confirm_key] = True
+                        st.rerun()
+
         if ltp is None:
             st.warning("Could not fetch live LTP — token may be expired.")
         st.divider()

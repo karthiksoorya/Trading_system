@@ -56,10 +56,16 @@ def signal_detected(signal_id: int, zone_class: str, zone_type: str,
 
 
 def trade_approved(signal_id: int, entry: float, sl: float, target: float):
+    keyboard = {
+        "inline_keyboard": [[
+            {"text": "🚨 Close Trade Now", "callback_data": f"close_{signal_id}"},
+        ]]
+    }
     _send(
         f"✅ <b>Trade #{signal_id} Approved</b>\n"
         f"Entry: {entry:.2f} | SL: {sl:.2f} | Target: {target:.2f}\n"
-        f"Monitoring for auto-exit..."
+        f"Monitoring for auto-exit...",
+        reply_markup=keyboard,
     )
 
 

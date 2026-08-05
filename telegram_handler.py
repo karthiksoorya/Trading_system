@@ -84,6 +84,30 @@ def _handle_callback(cb: dict, token: str):
             answer = f"❌ Signal #{sig_id} rejected."
             logger.info("Telegram rejected signal #%d", sig_id)
 
+        elif action.startswith("close_"):
+            trade_id = int(action.split("_", 1)[1])
+            from journal.db import get_open_trades, close_trade
+            import notify
+            import config
+            open_trades = get_open_trades()
+            match = next((dict(r) for r in open_trades if r["id"] == trade_id), None)
+            if not match:
+                answer = f"⚠️ Trade #{trade_id} is not open."
+            else:
+                try:
+                    from brokers import get_broker
+                    ltp = get_broker().get_ltp(config.NIFTY_SYMBOL)
+                except Exception:
+                    ltp = match["entry"]
+                pnl = round(
+                    (ltp - match["entry"]) if match["zone_class"] == "demand"
+                    else (match["entry"] - ltp), 2
+                )
+                close_trade(trade_id, ltp, "manual")
+                notify.trade_closed(trade_id, ltp, "manual", pnl)
+                answer = f"🚨 Trade #{trade_id} closed manually at {ltp:.2f} | P&L: {pnl:+.2f} pts"
+                logger.info("Telegram manually closed trade #%d at %.2f", trade_id, ltp)
+
     except Exception as e:
         answer = f"⚠️ Error: {e}"
         logger.warning("Telegram callback error: %s", e)
