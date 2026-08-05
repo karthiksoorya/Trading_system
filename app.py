@@ -802,32 +802,53 @@ with tab_approvals:
 # ══════════════════════════════════════════════════════════════════════════
 with tab_signals:
     st.header("Signals")
-    selected_date = st.date_input("Date", value=date.today())
+    _sf_c1, _sf_c2 = st.columns([2, 1])
+    selected_date = _sf_c1.date_input("Date", value=date.today())
+    _sig_mode_filter = _sf_c2.radio(
+        "Mode", ["All", "Paper", "Live"], horizontal=True, key="sig_mode_filter",
+        label_visibility="collapsed",
+    )
     rows = get_signals_for_date(selected_date.isoformat())
 
     if not rows:
         st.info("No signals logged for this date.")
     else:
         df = pd.DataFrame([dict(r) for r in rows])
+        if "mode" not in df.columns:
+            df["mode"] = "paper"
 
-        display_cols = [
-            "id", "status", "date", "time_signal", "zone_type", "zone_class", "timeframe",
-            "entry", "stop_loss", "intraday_target",
-            "booster_score", "confluence_count", "confluence_tfs",
-            "entry_type", "position_size",
-            "exit_price", "exit_reason", "pnl_points", "result",
-        ]
-        display_cols = [c for c in display_cols if c in df.columns]
+        if _sig_mode_filter == "Paper":
+            df = df[df["mode"] == "paper"]
+        elif _sig_mode_filter == "Live":
+            df = df[df["mode"] == "live"]
 
-        def _colour(val):
-            if val == "win":  return "background-color:#d4edda;color:#155724"
-            if val == "loss": return "background-color:#f8d7da;color:#721c24"
-            return ""
+        if df.empty:
+            st.info(f"No {_sig_mode_filter.lower()} signals for this date.")
+        else:
+            display_cols = [
+                "id", "mode", "status", "date", "time_signal", "zone_type", "zone_class", "timeframe",
+                "entry", "stop_loss", "intraday_target",
+                "booster_score", "confluence_count", "confluence_tfs",
+                "entry_type", "position_size",
+                "exit_price", "exit_reason", "pnl_points", "result",
+            ]
+            display_cols = [c for c in display_cols if c in df.columns]
 
-        styled = df[display_cols].style
-        if "result" in display_cols:
-            styled = styled.map(_colour, subset=["result"])
-        st.dataframe(styled, use_container_width=True, hide_index=True)
+            def _colour_row(row):
+                styles = [""] * len(row)
+                idx = row.index.tolist()
+                if "result" in idx:
+                    v = row["result"]
+                    if v == "win":  styles[idx.index("result")] = "background-color:#d4edda;color:#155724"
+                    if v == "loss": styles[idx.index("result")] = "background-color:#f8d7da;color:#721c24"
+                if "mode" in idx:
+                    m = row["mode"]
+                    if m == "live":  styles[idx.index("mode")] = "background-color:#f8d7da;color:#721c24;font-weight:bold"
+                    if m == "paper": styles[idx.index("mode")] = "background-color:#d1ecf1;color:#0c5460"
+                return styles
+
+            styled = df[display_cols].style.apply(_colour_row, axis=1)
+            st.dataframe(styled, use_container_width=True, hide_index=True)
 
         st.divider()
 
@@ -882,15 +903,28 @@ with tab_signals:
 # TAB 4 — PERFORMANCE
 # ══════════════════════════════════════════════════════════════════════════
 with tab_performance:
-    st.header("Performance")
+    _perf_mode = st.radio(
+        "View", ["All", "📄 Paper", "🔴 Live"], horizontal=True, key="perf_mode_filter",
+        label_visibility="collapsed",
+    )
+    _perf_mode_label = {"All": "All Trades", "📄 Paper": "Paper Trades", "🔴 Live": "Live Trades"}[_perf_mode]
+    st.header(f"Performance — {_perf_mode_label}")
 
     try:
         con = sqlite3.connect(config.DB_PATH)
         all_df = pd.read_sql("SELECT * FROM signals WHERE result IS NOT NULL", con)
         con.close()
 
+        if "mode" not in all_df.columns:
+            all_df["mode"] = "paper"
+
+        if _perf_mode == "📄 Paper":
+            all_df = all_df[all_df["mode"] == "paper"].copy()
+        elif _perf_mode == "🔴 Live":
+            all_df = all_df[all_df["mode"] == "live"].copy()
+
         if all_df.empty:
-            st.info("No closed trades yet. Approve and complete a trade to see stats here.")
+            st.info(f"No closed {_perf_mode_label.lower()} yet.")
         else:
             all_df["pnl_points"] = pd.to_numeric(all_df["pnl_points"], errors="coerce").fillna(0)
             all_df["date"]       = pd.to_datetime(all_df["date"])
@@ -1042,7 +1076,15 @@ with tab_performance:
 
             # ── Validation checklist ──────────────────────────────────────
             st.subheader("Validation Checklist (before going live)")
-            avg_pnl = all_df["pnl_points"].mean()
+            st.caption("Always evaluated on **paper trades only** — independent of the mode filter above.")
+            _paper_df_chk = pd.read_sql(
+                "SELECT pnl_points, result FROM signals WHERE result IS NOT NULL AND mode='paper'",
+                sqlite3.connect(config.DB_PATH),
+            )
+            avg_pnl = _paper_df_chk["pnl_points"].mean() if not _paper_df_chk.empty else 0
+            total_chk = len(_paper_df_chk)
+            wins_chk  = (_paper_df_chk["result"] == "win").sum() if not _paper_df_chk.empty else 0
+            win_rate_chk = wins_chk / total_chk * 100 if total_chk else 0
 
             # Count distinct weekday dates with ANY signal (any status) in last 14 days.
             # Using all signals (not just closed) so holidays/weekends are naturally skipped.
@@ -1062,9 +1104,9 @@ with tab_performance:
             _active_day_count = len(_trading_days)
             _five_days_ok = _active_day_count >= 5
 
-            st.checkbox(f"20+ trades logged ({total} so far)",   value=total >= 20)
-            st.checkbox(f"Win rate > 50% ({win_rate:.1f}%)",     value=win_rate > 50)
-            st.checkbox(f"Avg P&L positive ({avg_pnl:.2f} pts)", value=avg_pnl > 0)
+            st.checkbox(f"20+ paper trades logged ({total_chk} so far)",   value=total_chk >= 20)
+            st.checkbox(f"Paper win rate > 50% ({win_rate_chk:.1f}%)",     value=win_rate_chk > 50)
+            st.checkbox(f"Paper avg P&L positive ({avg_pnl:.2f} pts)", value=avg_pnl > 0)
             st.checkbox("System detects zones correctly",         value=False)
             st.checkbox(
                 f"No crashes for 5 consecutive trading days ({_active_day_count} active days in last 2 weeks)",
@@ -1085,7 +1127,16 @@ with tab_performance:
 # TAB 5 — LEARNING
 # ══════════════════════════════════════════════════════════════════════════
 with tab_learning:
-    st.header("🤖 What the System Has Learned")
+    _learn_mode = st.radio(
+        "Analyse", ["All", "📄 Paper", "🔴 Live"], horizontal=True, key="learn_mode_filter",
+        label_visibility="collapsed",
+    )
+    _learn_mode_sql = {"All": None, "📄 Paper": "paper", "🔴 Live": "live"}[_learn_mode]
+    _learn_where = (
+        f"result IS NOT NULL AND mode='{_learn_mode_sql}'"
+        if _learn_mode_sql else "result IS NOT NULL"
+    )
+    st.header(f"🤖 What the System Has Learned — {'All Trades' if not _learn_mode_sql else _learn_mode_sql.title()}")
     st.caption(
         "Auto-learn runs after every 10 closed trades. "
         "It disables zone types or timeframes whose win rate drops below 35% over 10+ trades."
@@ -1102,7 +1153,7 @@ with tab_learning:
     try:
         _con_l = sqlite3.connect(config.DB_PATH)
         _rows_l = _con_l.execute(
-            "SELECT zone_type, pnl_points FROM signals WHERE result IS NOT NULL"
+            f"SELECT zone_type, pnl_points FROM signals WHERE {_learn_where}"
         ).fetchall()
         _con_l.close()
 
@@ -1140,7 +1191,7 @@ with tab_learning:
     try:
         _con_l2 = sqlite3.connect(config.DB_PATH)
         _rows_l2 = _con_l2.execute(
-            "SELECT timeframe, pnl_points FROM signals WHERE result IS NOT NULL"
+            f"SELECT timeframe, pnl_points FROM signals WHERE {_learn_where}"
         ).fetchall()
         _con_l2.close()
 
@@ -1198,12 +1249,12 @@ with tab_learning:
 
     # ── Time of Day Analysis ──────────────────────────────────────────────
     st.subheader("Time of Day Analysis")
-    st.caption("Which hours produce the best results? Based on all closed trades.")
+    st.caption("Which hours produce the best results?")
     try:
         import collections as _col
         _con_t = sqlite3.connect(config.DB_PATH)
         _rows_t = _con_t.execute(
-            "SELECT time_signal, pnl_points, result FROM signals WHERE result IS NOT NULL"
+            f"SELECT time_signal, pnl_points, result FROM signals WHERE {_learn_where}"
         ).fetchall()
         _con_t.close()
 
