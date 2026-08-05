@@ -1,6 +1,7 @@
 import json
 import logging
 import threading
+import time
 from datetime import datetime, timedelta
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from urllib.parse import parse_qs, urlparse
@@ -19,6 +20,11 @@ _KNOWN_TOKENS: dict[str, int] = {
     "NSE:INDIA VIX":  264969,
     "NSE:NIFTY BANK": 260105,
 }
+
+# Module-level instruments cache — shared across all KiteAdapter instances.
+# instruments("NFO") fetches ~10k rows; caching avoids the 1-3s delay at approval time.
+_instruments_cache: dict[str, tuple[float, list]] = {}
+_INSTRUMENTS_TTL = 1800   # seconds — refresh every 30 min
 
 
 class KiteAdapter(BrokerBase):
@@ -170,6 +176,21 @@ class KiteAdapter(BrokerBase):
         except Exception:
             return False
 
+    def _get_instruments(self, exchange: str) -> list:
+        """Return instruments list, using a 30-min module-level cache to avoid per-approval delay."""
+        now = time.time()
+        cached = _instruments_cache.get(exchange)
+        if cached and (now - cached[0]) < _INSTRUMENTS_TTL:
+            return cached[1]
+        data = self._kite.instruments(exchange)
+        _instruments_cache[exchange] = (now, data)
+        logger.info("Instruments cache refreshed for %s (%d records)", exchange, len(data))
+        return data
+
+    def prefetch_instruments(self) -> None:
+        """Pre-warm the instruments cache. Call this right after login so approval is instant."""
+        self._get_instruments("NFO")
+
     def get_options_contract(self, ltp: float, direction: str) -> dict:
         """Find ATM weekly Nifty options contract. direction='demand'→CE, 'supply'→PE."""
         from datetime import date, timedelta, datetime as dt
@@ -183,8 +204,7 @@ class KiteAdapter(BrokerBase):
             days_ahead = 7                               # Today's expiry is past — use next
         expiry = today + timedelta(days=days_ahead)
 
-        instruments = self._kite.instruments("NFO")
-        for inst in instruments:
+        for inst in self._get_instruments("NFO"):
             if (inst.get("name") == "NIFTY"
                     and inst.get("instrument_type") == option_type
                     and inst.get("expiry") == expiry
@@ -206,8 +226,7 @@ class KiteAdapter(BrokerBase):
     def get_lot_size(self) -> int:
         """Return current Nifty lot size from Kite instruments (auto-updates when NSE revises)."""
         try:
-            instruments = self._kite.instruments("NFO")
-            for inst in instruments:
+            for inst in self._get_instruments("NFO"):
                 if inst.get("name") == "NIFTY" and inst.get("instrument_type") in ("CE", "PE"):
                     return int(inst.get("lot_size", config.NIFTY_LOT_SIZE))
         except Exception:

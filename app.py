@@ -410,6 +410,11 @@ with tab_engine:
             else:
                 try:
                     k.generate_session(token)
+                    # Pre-warm instruments cache so the first approval is instant
+                    try:
+                        k.prefetch_instruments()
+                    except Exception:
+                        pass
                     st.success("✅ Token saved. Engine is ready to start.")
                     st.rerun()
                 except Exception as e:
