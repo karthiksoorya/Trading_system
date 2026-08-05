@@ -44,34 +44,82 @@ st.set_page_config(
     layout="wide",
 )
 
-# ── Login gate ────────────────────────────────────────────────────────────
-_APP_PASSWORD = os.getenv("APP_PASSWORD", "")
+# ── Login gate — Telegram OTP ─────────────────────────────────────────────
+import secrets
+from datetime import timedelta as _td_login
+
+_TG_TOKEN   = os.getenv("TELEGRAM_BOT_TOKEN", "")
+_TG_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
+
+
+def _send_login_otp() -> str:
+    otp = f"{secrets.randbelow(1_000_000):06d}"
+    if _TG_TOKEN and _TG_CHAT_ID:
+        import requests as _req
+        _req.post(
+            f"https://api.telegram.org/bot{_TG_TOKEN}/sendMessage",
+            json={
+                "chat_id": _TG_CHAT_ID,
+                "text": f"🔐 <b>Login OTP</b>: <code>{otp}</code>\nExpires in 5 minutes.",
+                "parse_mode": "HTML",
+            },
+            timeout=5,
+        )
+    return otp
+
 
 if not st.session_state.get("authenticated"):
     st.markdown(
         """
         <style>
-        .login-box { max-width: 360px; margin: 8rem auto 0; padding: 2rem;
-                     border: 1px solid #ddd; border-radius: 12px; }
+        [data-testid="stAppViewContainer"] > .main { display:flex; justify-content:center; }
+        .login-wrap { width:340px; margin-top:8rem; }
         </style>
         """,
         unsafe_allow_html=True,
     )
-    with st.container():
-        st.markdown('<div class="login-box">', unsafe_allow_html=True)
-        st.markdown("## 🔐 Nifty Trading System")
-        st.caption("Enter your password to continue")
-        _pwd = st.text_input("Password", type="password", key="_login_pwd",
-                             label_visibility="collapsed", placeholder="Password")
-        if st.button("Login", type="primary", use_container_width=True):
-            if _APP_PASSWORD and _pwd == _APP_PASSWORD:
-                st.session_state["authenticated"] = True
+    st.markdown('<div class="login-wrap">', unsafe_allow_html=True)
+    st.markdown("## 🔐 Nifty Trading System")
+
+    if not _TG_TOKEN or not _TG_CHAT_ID:
+        st.error("Telegram not configured in .env — cannot send OTP.")
+    elif not st.session_state.get("_otp_sent"):
+        st.caption("A one-time code will be sent to your Telegram.")
+        if st.button("📲 Send OTP to Telegram", type="primary", use_container_width=True):
+            _otp = _send_login_otp()
+            st.session_state["_otp"]         = _otp
+            st.session_state["_otp_expiry"]  = datetime.now() + _td_login(minutes=5)
+            st.session_state["_otp_sent"]    = True
+            st.rerun()
+    else:
+        _remaining = st.session_state["_otp_expiry"] - datetime.now()
+        if _remaining.total_seconds() <= 0:
+            st.warning("OTP expired.")
+            if st.button("Resend OTP", use_container_width=True):
+                st.session_state.pop("_otp_sent", None)
                 st.rerun()
-            elif not _APP_PASSWORD:
-                st.error("APP_PASSWORD not set in .env — add it on the VPS.")
-            else:
-                st.error("Incorrect password.")
-        st.markdown('</div>', unsafe_allow_html=True)
+        else:
+            mins = int(_remaining.total_seconds() // 60)
+            secs = int(_remaining.total_seconds() % 60)
+            st.caption(f"Check Telegram. Code expires in {mins}m {secs}s.")
+            _entered = st.text_input("Enter 6-digit OTP", max_chars=6,
+                                     placeholder="000000", key="_otp_input")
+            c1, c2 = st.columns(2)
+            if c1.button("Verify", type="primary", use_container_width=True):
+                if _entered == st.session_state.get("_otp"):
+                    for k in ("_otp", "_otp_expiry", "_otp_sent"):
+                        st.session_state.pop(k, None)
+                    st.session_state["authenticated"] = True
+                    st.rerun()
+                else:
+                    st.error("Wrong OTP — try again.")
+            if c2.button("Resend", use_container_width=True):
+                _otp = _send_login_otp()
+                st.session_state["_otp"]        = _otp
+                st.session_state["_otp_expiry"] = datetime.now() + _td_login(minutes=5)
+                st.rerun()
+
+    st.markdown('</div>', unsafe_allow_html=True)
     st.stop()
 
 init_db()
