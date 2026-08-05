@@ -822,18 +822,18 @@ with tab_signals:
         elif _sig_mode_filter == "Live":
             df = df[df["mode"] == "live"]
 
+        display_cols = [
+            "id", "mode", "status", "date", "time_signal", "zone_type", "zone_class", "timeframe",
+            "entry", "stop_loss", "intraday_target",
+            "booster_score", "confluence_count", "confluence_tfs",
+            "entry_type", "position_size",
+            "exit_price", "exit_reason", "pnl_points", "result",
+        ]
+        display_cols = [c for c in display_cols if c in df.columns]
+
         if df.empty:
             st.info(f"No {_sig_mode_filter.lower()} signals for this date.")
         else:
-            display_cols = [
-                "id", "mode", "status", "date", "time_signal", "zone_type", "zone_class", "timeframe",
-                "entry", "stop_loss", "intraday_target",
-                "booster_score", "confluence_count", "confluence_tfs",
-                "entry_type", "position_size",
-                "exit_price", "exit_reason", "pnl_points", "result",
-            ]
-            display_cols = [c for c in display_cols if c in df.columns]
-
             def _colour_row(row):
                 styles = [""] * len(row)
                 idx = row.index.tolist()
@@ -887,17 +887,18 @@ with tab_signals:
         st.divider()
 
         # ── Export ────────────────────────────────────────────────────────
-        c1, c2 = st.columns(2)
-        if c1.button("💾 Save CSV to disk"):
-            path = export_day(selected_date.isoformat())
-            c1.success(f"Saved → {path}")
+        if not df.empty:
+            c1, c2 = st.columns(2)
+            if c1.button("💾 Save CSV to disk"):
+                path = export_day(selected_date.isoformat())
+                c1.success(f"Saved → {path}")
 
-        c2.download_button(
-            "⬇ Download CSV",
-            data=df[display_cols].to_csv(index=False).encode("utf-8"),
-            file_name=f"trades_{selected_date}.csv",
-            mime="text/csv",
-        )
+            c2.download_button(
+                "⬇ Download CSV",
+                data=df[display_cols].to_csv(index=False).encode("utf-8"),
+                file_name=f"trades_{selected_date}.csv",
+                mime="text/csv",
+            )
 
 # ══════════════════════════════════════════════════════════════════════════
 # TAB 4 — PERFORMANCE
@@ -1077,10 +1078,12 @@ with tab_performance:
             # ── Validation checklist ──────────────────────────────────────
             st.subheader("Validation Checklist (before going live)")
             st.caption("Always evaluated on **paper trades only** — independent of the mode filter above.")
+            _chk_con = sqlite3.connect(config.DB_PATH)
             _paper_df_chk = pd.read_sql(
                 "SELECT pnl_points, result FROM signals WHERE result IS NOT NULL AND mode='paper'",
-                sqlite3.connect(config.DB_PATH),
+                _chk_con,
             )
+            _chk_con.close()
             avg_pnl = _paper_df_chk["pnl_points"].mean() if not _paper_df_chk.empty else 0
             total_chk = len(_paper_df_chk)
             wins_chk  = (_paper_df_chk["result"] == "win").sum() if not _paper_df_chk.empty else 0
