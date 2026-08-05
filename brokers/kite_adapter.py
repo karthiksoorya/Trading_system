@@ -170,6 +170,21 @@ class KiteAdapter(BrokerBase):
         except Exception:
             return False
 
+    def get_funds(self) -> dict:
+        """Return available equity margin from Kite. Keys: cash, live_balance, used."""
+        try:
+            m = self._kite.margins(segment="equity")
+            avail = m.get("available", {})
+            used  = m.get("utilised", {})
+            return {
+                "cash":         avail.get("cash", 0),
+                "live_balance": avail.get("live_balance", 0),
+                "used":         used.get("debits", 0),
+                "ok":           True,
+            }
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
     # ── Helpers ────────────────────────────────────────────────────────────
 
     def _resolve_token(self, symbol: str) -> int:

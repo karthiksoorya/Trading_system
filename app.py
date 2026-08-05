@@ -217,6 +217,18 @@ with st.sidebar:
     _sb_mode = config.load_settings().get("MODE", "paper")
     if _sb_mode == "live":
         st.error("🔴 LIVE MODE")
+        try:
+            from brokers.kite_adapter import KiteAdapter as _KA
+            _funds = _KA().get_funds()
+            if _funds["ok"]:
+                st.metric("Available Margin", f"₹{_funds['live_balance']:,.0f}")
+                st.metric("Used Margin",      f"₹{_funds['used']:,.0f}")
+                if _funds["live_balance"] < config.CAPITAL:
+                    st.warning(f"⚠️ Margin ₹{_funds['live_balance']:,.0f} is below capital ₹{config.CAPITAL:,}")
+            else:
+                st.caption(f"Margin fetch failed: {_funds.get('error','')}")
+        except Exception:
+            pass
     else:
         st.success("🟢 PAPER MODE")
 
