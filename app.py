@@ -348,6 +348,7 @@ with tab_engine:
 
     # ── Token ─────────────────────────────────────────────────────────────
     st.subheader("1. Generate Today's Token")
+    st.caption("Required once every morning. Kite token expires at midnight.")
 
     try:
         from brokers.kite_adapter import KiteAdapter
@@ -358,14 +359,7 @@ with tab_engine:
         login_url = None
         k = None
 
-    # ── Auto-capture mode (recommended) ───────────────────────────────────
-    st.markdown("**Option A — Auto (Recommended): Login from your phone**")
-    st.caption(
-        "Sends the login link to Telegram. After you login, "
-        "VPS captures the token automatically. No copy-pasting needed."
-    )
-
-    _capturing = st.session_state.get("_token_capturing", False)
+    # Token status
     _token_today = False
     if config.TOKEN_FILE.exists():
         try:
@@ -376,53 +370,48 @@ with tab_engine:
             pass
 
     if _token_today:
-        st.success("✅ Token already captured for today. Engine is ready.")
-        st.session_state["_token_capturing"] = False
-    elif _capturing:
-        st.info("⏳ Waiting for you to login via Telegram link… (checking every 5s)")
-        import time as _time
-        _time.sleep(5)
-        st.rerun()
+        st.success("✅ Token valid for today — engine is ready to start.")
     else:
-        if st.button("📲 Send login link to Telegram & auto-capture", type="primary",
-                     disabled=not login_url, use_container_width=True):
-            import threading as _threading
-            import notify as _notify
-
-            _notify._send(
-                f"🔑 <b>Kite Login — tap to open</b>\n"
-                f'<a href="{login_url}">Login to Kite</a>\n\n'
-                f"Token will be captured automatically after login."
-            )
-
-            def _capture_bg():
-                try:
-                    k.capture_token_via_server(port=config.KITE_TOKEN_PORT, timeout=300)
-                except Exception:
-                    pass
-
-            _threading.Thread(target=_capture_bg, daemon=True, name="token-capture").start()
-            st.session_state["_token_capturing"] = True
-            st.rerun()
+        st.warning("⚠️ No valid token yet. Complete the steps below.")
 
     st.divider()
 
-    # ── Manual fallback ───────────────────────────────────────────────────
-    with st.expander("Option B — Manual (fallback): paste redirect URL"):
-        if login_url:
-            st.markdown(f"**Step 1 →** [Click here to log in to Kite]({login_url})")
-        raw_url = st.text_input(
-            "Step 2 → Paste the full redirect URL from your browser address bar",
-            placeholder="http://127.0.0.1/?request_token=XXXXXX&status=success",
+    # Step 1: Send login link to Telegram
+    st.markdown("**Step 1 — Send login link to your phone**")
+    if st.button("📲 Send Kite login link to Telegram", type="primary",
+                 disabled=not login_url, use_container_width=True):
+        import notify as _notify
+        _notify._send(
+            f"🔑 <b>Kite Login — tap to open</b>\n"
+            f'<a href="{login_url}">Login to Kite</a>\n\n'
+            f"After login, copy the <b>request_token</b> from the address bar "
+            f"and paste it in the dashboard."
         )
-        if st.button("💾 Save Token", disabled=not raw_url):
+        st.success("Link sent to Telegram! Tap it on your phone.")
+
+    st.divider()
+
+    # Step 2: Paste token
+    st.markdown("**Step 2 — After login, paste the token**")
+    st.caption(
+        "After logging in, your browser shows 'Site can't be reached'. "
+        "That's normal. Copy the full URL from the address bar and paste it below "
+        "(or just the token value after `request_token=`)."
+    )
+    with st.form("_token_form"):
+        raw_url = st.text_input(
+            "Paste redirect URL or just the request_token value",
+            placeholder="http://127.0.0.1/?request_token=XXXXXX  OR  just XXXXXX",
+        )
+        if st.form_submit_button("💾 Save Token", type="primary", use_container_width=True):
             token = _extract_token(raw_url)
             if not token:
-                st.error("Could not find request_token in the URL. Paste the full redirect URL.")
+                st.error("Could not read token. Paste the full URL or the token value.")
             else:
                 try:
                     k.generate_session(token)
                     st.success("✅ Token saved. Engine is ready to start.")
+                    st.rerun()
                 except Exception as e:
                     st.error(f"Token exchange failed: {e}")
 
