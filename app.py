@@ -429,14 +429,15 @@ with tab_engine:
                 st.error("KITE_API_SECRET is missing in .env — cannot complete token exchange.")
             else:
                 try:
-                    k.generate_session(token)
-                    # Pre-warm instruments cache so the first approval is instant
-                    try:
-                        k.prefetch_instruments()
-                    except Exception:
-                        pass
-                    st.success("✅ Token saved. Engine is ready to start.")
-                    st.rerun()
+                    with st.spinner("Exchanging token with Kite..."):
+                        k.generate_session(token)
+                    with st.spinner("Pre-loading instruments (makes first trade instant)..."):
+                        try:
+                            k.prefetch_instruments()
+                        except Exception:
+                            pass
+                    st.success("✅ Token saved! Engine is ready to start.")
+                    st.balloons()
                 except Exception as e:
                     import traceback
                     st.error(f"**{type(e).__name__}**: {e}")
