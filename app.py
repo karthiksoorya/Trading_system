@@ -386,26 +386,18 @@ with tab_engine:
 
     st.divider()
 
-    # Step 1: Send login link to Telegram
-    st.markdown("**Step 1 — Send login link to your phone**")
-    if st.button("📲 Send Kite login link to Telegram", type="primary",
-                 disabled=not login_url, use_container_width=True):
-        import notify as _notify
-        _notify._send(
-            f"🔑 <b>Kite Login — tap to open</b>\n"
-            f'<a href="{login_url}">Login to Kite</a>\n\n'
-            f"After login, copy the <b>request_token</b> from the address bar "
-            f"and paste it in the dashboard."
-        )
-        st.success("Link sent to Telegram! Tap it on your phone.")
+    # Step 1: Open login URL
+    st.markdown("**Step 1 — Open Kite login link**")
+    if login_url:
+        st.link_button("🔑 Login to Kite", login_url, use_container_width=True, type="primary")
+    st.caption("Click the button above. Login with your Kite password + TOTP. Your browser will show 'Site can't be reached' — that's normal.")
 
     st.divider()
 
     # Step 2: Paste token
-    st.markdown("**Step 2 — After login, paste the token**")
+    st.markdown("**Step 2 — Paste the token**")
     st.caption(
-        "After logging in, your browser shows 'Site can't be reached'. "
-        "That's normal. Copy the full URL from the address bar and paste it below "
+        "Copy the full URL from the address bar and paste below "
         "(or just the token value after `request_token=`)."
     )
     with st.form("_token_form"):
@@ -1341,11 +1333,11 @@ with tab_tutorial:
 **Do this every trading day before 9:15 AM:**
 
 1. Open dashboard → **Engine tab**
-2. Click **"📲 Send login link to Telegram & auto-capture"**
-3. Tap the Kite login link in Telegram on your phone
-4. Login with password + TOTP (6-digit authenticator code)
-5. Phone shows *"Token captured. You can close this tab."*
-6. Dashboard shows ✅ Token captured
+2. Click **"🔑 Login to Kite"** button in the Engine tab
+3. Login with your Kite password + TOTP (6-digit authenticator code)
+4. Browser shows *"Site can't be reached"* — that's expected
+5. Copy the full URL from the address bar and paste it in **Step 2**
+6. Click **Save Token** → dashboard shows ✅ Token valid
 7. Click **Start Engine**
 8. Sidebar shows 🟢 Running
 
