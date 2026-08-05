@@ -94,13 +94,9 @@ def _migrate(con):
         ("confluence_count", "INTEGER DEFAULT 1"),
         ("confluence_tfs",   "TEXT"),
         ("status",           "TEXT NOT NULL DEFAULT 'pending'"),
-    ]
-    migrations = [
-        ("confluence_count", "INTEGER DEFAULT 1"),
-        ("confluence_tfs",   "TEXT"),
-        ("status",           "TEXT NOT NULL DEFAULT 'pending'"),
         ("kite_order_id",    "TEXT"),
         ("options_symbol",   "TEXT"),
+        ("mode",             "TEXT DEFAULT 'paper'"),
     ]
     for col, definition in migrations:
         if col not in existing:
@@ -110,6 +106,8 @@ def _migrate(con):
     con.execute(
         "UPDATE signals SET status='closed' WHERE status='approved' AND exit_price IS NOT NULL"
     )
+    # Backfill: any row without a mode tag was logged in paper mode
+    con.execute("UPDATE signals SET mode='paper' WHERE mode IS NULL")
 
 
 # ── Write ─────────────────────────────────────────────────────────────────
