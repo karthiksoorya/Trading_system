@@ -820,11 +820,33 @@ with tab_performance:
             # ── Validation checklist ──────────────────────────────────────
             st.subheader("Validation Checklist (before going live)")
             avg_pnl = all_df["pnl_points"].mean()
+
+            # Count distinct weekday dates with ANY signal (any status) in last 14 days.
+            # Using all signals (not just closed) so holidays/weekends are naturally skipped.
+            from datetime import date as _date, timedelta as _td
+            _con2 = sqlite3.connect(config.DB_PATH)
+            _active_dates = _con2.execute("SELECT DISTINCT date FROM signals").fetchall()
+            _con2.close()
+            _cutoff = _date.today() - _td(days=14)
+            _trading_days = set()
+            for (_d,) in _active_dates:
+                try:
+                    _day = _date.fromisoformat(_d)
+                    if _day >= _cutoff and _day.weekday() < 5:
+                        _trading_days.add(_day)
+                except Exception:
+                    pass
+            _active_day_count = len(_trading_days)
+            _five_days_ok = _active_day_count >= 5
+
             st.checkbox(f"20+ trades logged ({total} so far)",   value=total >= 20)
             st.checkbox(f"Win rate > 50% ({win_rate:.1f}%)",     value=win_rate > 50)
             st.checkbox(f"Avg P&L positive ({avg_pnl:.2f} pts)", value=avg_pnl > 0)
             st.checkbox("System detects zones correctly",         value=False)
-            st.checkbox("No crashes for 5 consecutive days",     value=False)
+            st.checkbox(
+                f"No crashes for 5 consecutive trading days ({_active_day_count} active days in last 2 weeks)",
+                value=_five_days_ok,
+            )
 
             st.divider()
 
