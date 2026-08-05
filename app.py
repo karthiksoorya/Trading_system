@@ -68,7 +68,9 @@ def _send_login_otp() -> str:
     return otp
 
 
-if not st.session_state.get("authenticated"):
+_is_live_mode = config.load_settings().get("MODE", "paper") == "live"
+
+if _is_live_mode and not st.session_state.get("authenticated"):
     st.markdown(
         """
         <style>
@@ -80,6 +82,7 @@ if not st.session_state.get("authenticated"):
     )
     st.markdown('<div class="login-wrap">', unsafe_allow_html=True)
     st.markdown("## 🔐 Nifty Trading System")
+    st.error("🔴 Live mode — OTP required.")
 
     if not _TG_TOKEN or not _TG_CHAT_ID:
         st.error("Telegram not configured in .env — cannot send OTP.")
@@ -216,10 +219,11 @@ with st.sidebar:
         st.rerun()
 
     st.caption(f"Updated: {datetime.now().strftime('%H:%M:%S')}")
-    st.divider()
-    if st.button("🚪 Logout", use_container_width=True):
-        st.session_state.clear()
-        st.rerun()
+    if _is_live_mode:
+        st.divider()
+        if st.button("🚪 Logout", use_container_width=True):
+            st.session_state.clear()
+            st.rerun()
 
 # ── Engine panel ─────────────────────────────────────────────────────────
 
