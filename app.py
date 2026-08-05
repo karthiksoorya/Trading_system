@@ -102,10 +102,14 @@ if not st.session_state.get("authenticated"):
             mins = int(_remaining.total_seconds() // 60)
             secs = int(_remaining.total_seconds() % 60)
             st.caption(f"Check Telegram. Code expires in {mins}m {secs}s.")
-            _entered = st.text_input("Enter 6-digit OTP", max_chars=6,
-                                     placeholder="000000", key="_otp_input")
-            c1, c2 = st.columns(2)
-            if c1.button("Verify", type="primary", use_container_width=True):
+            with st.form("_otp_form", clear_on_submit=False):
+                _entered = st.text_input("Enter 6-digit OTP", max_chars=6,
+                                         placeholder="000000", key="_otp_input")
+                c1, c2 = st.columns(2)
+                _verify  = c1.form_submit_button("Verify", type="primary", use_container_width=True)
+                _resend  = c2.form_submit_button("Resend", use_container_width=True)
+
+            if _verify:
                 if _entered == st.session_state.get("_otp"):
                     for k in ("_otp", "_otp_expiry", "_otp_sent"):
                         st.session_state.pop(k, None)
@@ -113,7 +117,7 @@ if not st.session_state.get("authenticated"):
                     st.rerun()
                 else:
                     st.error("Wrong OTP — try again.")
-            if c2.button("Resend", use_container_width=True):
+            if _resend:
                 _otp = _send_login_otp()
                 st.session_state["_otp"]        = _otp
                 st.session_state["_otp_expiry"] = datetime.now() + _td_login(minutes=5)
