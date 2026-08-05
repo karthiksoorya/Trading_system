@@ -292,8 +292,8 @@ def _engine_panel():
 
 # ── Tabs ──────────────────────────────────────────────────────────────────
 _pending_label = f"🔔 Approvals ({pending_count()})" if pending_count() else "🔔 Approvals"
-tab_approvals, tab_engine, tab_signals, tab_performance = st.tabs([
-    _pending_label, "🔧 Engine", "📊 Signals", "📈 Performance"
+tab_approvals, tab_engine, tab_signals, tab_performance, tab_learning = st.tabs([
+    _pending_label, "🔧 Engine", "📊 Signals", "📈 Performance", "🤖 Learning"
 ])
 
 
@@ -911,41 +911,6 @@ with tab_performance:
 
             st.divider()
 
-            # ── Auto-Learn Status ─────────────────────────────────────────
-            st.subheader("Auto-Learn Status")
-            _al_settings         = config.load_settings()
-            _disabled_zt         = _al_settings.get("DISABLED_ZONE_TYPES", [])
-            _all_tfs             = [config.TF_LOWER, config.TF_INTERMEDIATE, config.TF_HIGHER]
-            _active_tfs          = _al_settings.get("SCAN_TIMEFRAMES", _all_tfs)
-            _disabled_tfs        = [tf for tf in _all_tfs if tf not in _active_tfs]
-
-            if not _disabled_zt and not _disabled_tfs:
-                st.info("Nothing auto-disabled yet. System will analyse after every 10 closed trades.")
-            else:
-                st.warning(
-                    "The learning engine has auto-disabled the following underperformers "
-                    "(win rate < 35% over 10+ trades):"
-                )
-                for zt in _disabled_zt:
-                    c1, c2 = st.columns([3, 1])
-                    c1.markdown(f"❌ Zone type **{zt}** (auto-disabled)")
-                    if c2.button(f"Re-enable {zt}", key=f"reenable_zt_{zt}"):
-                        _new_disabled = [z for z in _disabled_zt if z != zt]
-                        config.save_settings({"DISABLED_ZONE_TYPES": _new_disabled})
-                        st.success(f"{zt} re-enabled.")
-                        st.rerun()
-
-                for tf in _disabled_tfs:
-                    c1, c2 = st.columns([3, 1])
-                    c1.markdown(f"❌ Timeframe **{tf}** (auto-disabled)")
-                    if c2.button(f"Re-enable {tf}", key=f"reenable_tf_{tf}"):
-                        _new_tfs = _active_tfs + [tf]
-                        config.save_settings({"SCAN_TIMEFRAMES": _new_tfs})
-                        st.success(f"{tf} re-enabled.")
-                        st.rerun()
-
-                st.caption("Re-enabling restores the item to the scan. Monitor results carefully.")
-
             st.divider()
 
             # ── Validation checklist ──────────────────────────────────────
@@ -987,3 +952,132 @@ with tab_performance:
 
     except Exception as e:
         st.warning(f"Could not load performance data: {e}")
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# TAB 5 — LEARNING
+# ══════════════════════════════════════════════════════════════════════════
+with tab_learning:
+    st.header("🤖 What the System Has Learned")
+    st.caption(
+        "Auto-learn runs after every 10 closed trades. "
+        "It disables zone types or timeframes whose win rate drops below 35% over 10+ trades."
+    )
+
+    _l = config.load_settings()
+    _disabled_zt  = _l.get("DISABLED_ZONE_TYPES", [])
+    _all_tfs_l    = [config.TF_LOWER, config.TF_INTERMEDIATE, config.TF_HIGHER]
+    _active_tfs_l = _l.get("SCAN_TIMEFRAMES", _all_tfs_l)
+    _disabled_tfs = [tf for tf in _all_tfs_l if tf not in _active_tfs_l]
+
+    # ── Win-rate table by zone type ───────────────────────────────────────
+    st.subheader("Zone Type Performance")
+    try:
+        _con_l = sqlite3.connect(config.DB_PATH)
+        _rows_l = _con_l.execute(
+            "SELECT zone_type, pnl_points FROM signals WHERE result IS NOT NULL"
+        ).fetchall()
+        _con_l.close()
+
+        if _rows_l:
+            import collections
+            _zt_stats: dict = collections.defaultdict(lambda: {"trades": 0, "wins": 0, "pnl": 0.0})
+            for zt, pnl in _rows_l:
+                _zt_stats[zt]["trades"] += 1
+                if pnl and pnl > 0:
+                    _zt_stats[zt]["wins"] += 1
+                _zt_stats[zt]["pnl"] += pnl or 0.0
+
+            _zt_rows = []
+            for zt, s in sorted(_zt_stats.items()):
+                wr = s["wins"] / s["trades"] * 100 if s["trades"] else 0
+                status = "❌ Disabled" if zt in _disabled_zt else ("✅ Active" if wr >= 35 else "⚠️ At risk")
+                _zt_rows.append({
+                    "Zone Type": zt,
+                    "Trades": s["trades"],
+                    "Wins": s["wins"],
+                    "Win Rate": f"{wr:.0f}%",
+                    "Avg P&L (pts)": f"{s['pnl'] / s['trades']:.2f}",
+                    "Status": status,
+                })
+            st.dataframe(_zt_rows, use_container_width=True, hide_index=True)
+        else:
+            st.info("No closed trades yet — learning will begin after 10 trades.")
+    except Exception as e:
+        st.warning(f"Could not load zone stats: {e}")
+
+    st.divider()
+
+    # ── Win-rate table by timeframe ───────────────────────────────────────
+    st.subheader("Timeframe Performance")
+    try:
+        _con_l2 = sqlite3.connect(config.DB_PATH)
+        _rows_l2 = _con_l2.execute(
+            "SELECT timeframe, pnl_points FROM signals WHERE result IS NOT NULL"
+        ).fetchall()
+        _con_l2.close()
+
+        if _rows_l2:
+            _tf_stats: dict = collections.defaultdict(lambda: {"trades": 0, "wins": 0, "pnl": 0.0})
+            for tf, pnl in _rows_l2:
+                _tf_stats[tf]["trades"] += 1
+                if pnl and pnl > 0:
+                    _tf_stats[tf]["wins"] += 1
+                _tf_stats[tf]["pnl"] += pnl or 0.0
+
+            _tf_rows = []
+            for tf, s in sorted(_tf_stats.items()):
+                wr = s["wins"] / s["trades"] * 100 if s["trades"] else 0
+                status = "❌ Disabled" if tf in _disabled_tfs else ("✅ Active" if wr >= 35 else "⚠️ At risk")
+                _tf_rows.append({
+                    "Timeframe": tf,
+                    "Trades": s["trades"],
+                    "Wins": s["wins"],
+                    "Win Rate": f"{wr:.0f}%",
+                    "Avg P&L (pts)": f"{s['pnl'] / s['trades']:.2f}",
+                    "Status": status,
+                })
+            st.dataframe(_tf_rows, use_container_width=True, hide_index=True)
+        else:
+            st.info("No closed trades yet.")
+    except Exception as e:
+        st.warning(f"Could not load timeframe stats: {e}")
+
+    st.divider()
+
+    # ── Re-enable controls ────────────────────────────────────────────────
+    st.subheader("Re-enable Disabled Items")
+    if not _disabled_zt and not _disabled_tfs:
+        st.success("Nothing is currently disabled by the learning engine.")
+    else:
+        st.caption("Re-enabling restores the item to active scanning. Monitor results carefully after re-enabling.")
+        for zt in _disabled_zt:
+            c1, c2 = st.columns([3, 1])
+            c1.markdown(f"❌ Zone type **{zt}**")
+            if c2.button(f"Re-enable", key=f"l_reenable_zt_{zt}", use_container_width=True):
+                config.save_settings({"DISABLED_ZONE_TYPES": [z for z in _disabled_zt if z != zt]})
+                st.success(f"{zt} re-enabled.")
+                st.rerun()
+
+        for tf in _disabled_tfs:
+            c1, c2 = st.columns([3, 1])
+            c1.markdown(f"❌ Timeframe **{tf}**")
+            if c2.button(f"Re-enable", key=f"l_reenable_tf_{tf}", use_container_width=True):
+                config.save_settings({"SCAN_TIMEFRAMES": _active_tfs_l + [tf]})
+                st.success(f"{tf} re-enabled.")
+                st.rerun()
+
+    st.divider()
+
+    # ── Learning log ──────────────────────────────────────────────────────
+    st.subheader("Learning Log")
+    _log_file = config.BASE_DIR / "logs" / "autolearn.log"
+    if _log_file.exists():
+        _log_lines = _log_file.read_text(encoding="utf-8", errors="ignore").strip().splitlines()
+        if _log_lines:
+            with st.expander(f"📋 Last {min(50, len(_log_lines))} log entries", expanded=True):
+                st.code("\n".join(_log_lines[-50:]), language=None)
+        else:
+            st.info("Log file is empty — no learning events yet.")
+    else:
+        st.info("No learning log yet. It appears after the first 10 closed trades.")
