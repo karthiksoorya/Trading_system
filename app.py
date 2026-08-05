@@ -441,6 +441,19 @@ with tab_engine:
         help="1 = any signal, 2 = confirmed by 2 TFs, 3 = all 3 TFs agree.",
     )
 
+    st.markdown("**Scan Window** — restrict scanning to specific market hours (IST)")
+    _scan_win = _current.get("SCAN_WINDOW", {"start": "09:15", "end": "15:25"})
+    _sw_cols = st.columns(2)
+    scan_start_time = _sw_cols[0].text_input(
+        "Scan from (HH:MM)", value=_scan_win["start"],
+        help="e.g. 10:00 — skip the opening volatility window",
+    )
+    scan_end_time = _sw_cols[1].text_input(
+        "Scan until (HH:MM)", value=_scan_win["end"],
+        help="e.g. 15:00 — stop before end-of-day rush",
+    )
+    st.caption("Set 09:15 → 15:25 to scan all day. Example: set 10:00 → 14:59 to skip 12:xx chop.")
+
     if st.button("💾 Save Settings"):
         if not scan_tfs:
             st.error("Select at least one timeframe.")
@@ -456,11 +469,12 @@ with tab_engine:
                 "ZONE_APPROACH_POINTS":  zone_approach,
                 "MIN_BOOSTER_SCORE":     min_score,
                 "MIN_CONFLUENCE":        min_conf,
+                "SCAN_WINDOW":           {"start": scan_start_time, "end": scan_end_time},
             })
             st.success(
                 f"Saved — TF: {entry_tf} | Score ≥ {min_score} | "
                 f"Confluence ≥ {min_conf} TF | Approach ≤ {zone_approach} pts | "
-                f"Expiry: {expiry_minutes} min"
+                f"Expiry: {expiry_minutes} min | Window: {scan_start_time}–{scan_end_time}"
             )
 
     st.divider()
@@ -1070,6 +1084,70 @@ with tab_learning:
                 config.save_settings({"SCAN_TIMEFRAMES": _active_tfs_l + [tf]})
                 st.success(f"{tf} re-enabled.")
                 st.rerun()
+
+    st.divider()
+
+    # ── Time of Day Analysis ──────────────────────────────────────────────
+    st.subheader("Time of Day Analysis")
+    st.caption("Which hours produce the best results? Based on all closed trades.")
+    try:
+        import collections as _col
+        _con_t = sqlite3.connect(config.DB_PATH)
+        _rows_t = _con_t.execute(
+            "SELECT time_signal, pnl_points, result FROM signals WHERE result IS NOT NULL"
+        ).fetchall()
+        _con_t.close()
+
+        if _rows_t:
+            _hr_stats: dict = _col.defaultdict(lambda: {"trades": 0, "wins": 0, "pnl": 0.0})
+            for _ts, _pnl, _res in _rows_t:
+                try:
+                    _hr = int(_ts[:2])
+                except Exception:
+                    continue
+                _hr_stats[_hr]["trades"] += 1
+                if _res == "win":
+                    _hr_stats[_hr]["wins"] += 1
+                _hr_stats[_hr]["pnl"] += _pnl or 0.0
+
+            _hr_rows = []
+            _best_hr = max(_hr_stats, key=lambda h: _hr_stats[h]["pnl"] / _hr_stats[h]["trades"])
+            _worst_hr = min(
+                (h for h in _hr_stats if _hr_stats[h]["trades"] >= 3),
+                key=lambda h: _hr_stats[h]["wins"] / _hr_stats[h]["trades"],
+                default=None,
+            )
+            for _hr in sorted(_hr_stats):
+                s = _hr_stats[_hr]
+                wr = s["wins"] / s["trades"] * 100
+                avg = s["pnl"] / s["trades"]
+                tag = ""
+                if _hr == _best_hr:
+                    tag = "⭐ Best"
+                elif _worst_hr and _hr == _worst_hr:
+                    tag = "⚠️ Weakest"
+                _hr_rows.append({
+                    "Hour": f"{_hr:02d}:00 – {_hr:02d}:59",
+                    "Trades": s["trades"],
+                    "Wins": s["wins"],
+                    "Losses": s["trades"] - s["wins"],
+                    "Win Rate": f"{wr:.0f}%",
+                    "Avg P&L (pts)": f"{avg:+.1f}",
+                    "Total P&L (pts)": f"{s['pnl']:+.1f}",
+                    "Note": tag,
+                })
+            st.dataframe(_hr_rows, use_container_width=True, hide_index=True)
+
+            if _worst_hr:
+                st.info(
+                    f"💡 **{_worst_hr:02d}:00–{_worst_hr:02d}:59** is your weakest window "
+                    f"({_hr_stats[_worst_hr]['wins']}/{_hr_stats[_worst_hr]['trades']} wins). "
+                    f"Consider setting Scan Window in Settings to skip it."
+                )
+        else:
+            st.info("No closed trades yet.")
+    except Exception as e:
+        st.warning(f"Could not load time analysis: {e}")
 
     st.divider()
 

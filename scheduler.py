@@ -111,6 +111,13 @@ def _scan_core():
     zone_approach_pts   = _s.get("ZONE_APPROACH_POINTS",   config.ZONE_APPROACH_POINTS)
     disabled_zone_types = set(_s.get("DISABLED_ZONE_TYPES", []))
 
+    # ── Scan window filter ────────────────────────────────────────────────
+    _win    = _s.get("SCAN_WINDOW", {"start": "09:15", "end": "15:25"})
+    _now_hm = datetime.now().strftime("%H:%M")
+    if not (_win["start"] <= _now_hm <= _win["end"]):
+        logger.info("Outside scan window (%s–%s) — skipping.", _win["start"], _win["end"])
+        return
+
     # ── Step 1: collect valid zones for every TF ──────────────────────────
     valid_zones: dict[str, list] = {}
     recent_candles: dict[str, list] = {}
