@@ -396,10 +396,20 @@ with tab_engine:
 
     # Step 2: Paste token
     st.markdown("**Step 2 — Paste the token**")
-    st.caption(
-        "Copy the full URL from the address bar and paste below "
-        "(or just the token value after `request_token=`)."
-    )
+
+    # Auto-capture: if Kite redirected back to THIS app, request_token is in the URL params
+    _auto_token = ""
+    try:
+        _qp = st.query_params
+        if "request_token" in _qp:
+            _auto_token = _qp["request_token"]
+            st.query_params.clear()   # remove from address bar
+            st.info(f"✅ Token auto-captured from redirect URL.")
+    except Exception:
+        pass
+
+    if not _auto_token:
+        st.caption("Copy the full URL from the address bar and paste below (or just the token value after `request_token=`).")
 
     # Pre-flight: warn if API secret is missing
     if not config.KITE_API_SECRET:
@@ -408,6 +418,7 @@ with tab_engine:
     with st.form("_token_form"):
         raw_url = st.text_input(
             "Paste redirect URL or just the request_token value",
+            value=_auto_token,
             placeholder="http://127.0.0.1/?request_token=XXXXXX  OR  just XXXXXX",
         )
         if st.form_submit_button("💾 Save Token", type="primary", use_container_width=True):
