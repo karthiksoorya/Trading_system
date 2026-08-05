@@ -389,8 +389,8 @@ with tab_engine:
     # Step 1: Open login URL
     st.markdown("**Step 1 — Open Kite login link**")
     if login_url:
-        st.link_button("🔑 Login to Kite", login_url, use_container_width=True, type="primary")
-    st.caption("Click the button above. Login with your Kite password + TOTP. Your browser will show 'Site can't be reached' — that's normal.")
+        st.markdown(f"### [🔑 Click here to Login to Kite]({login_url})")
+    st.caption("Tap the link above. Login with your Kite password + TOTP. Your browser will show 'Site can't be reached' — that's normal.")
 
     st.divider()
 
