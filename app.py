@@ -667,6 +667,18 @@ def _approvals_tab():
                                   use_container_width=True, key=f"close_yes_{t['id']}"):
                         _exit = ltp or entry
                         _pnl  = round((_exit - entry if zone_class == "demand" else entry - _exit), 2)
+                        # ── Live: place real options exit order ───────────
+                        if config.load_settings().get("MODE") == "live":
+                            _opts_sym = t.get("options_symbol")
+                            if _opts_sym:
+                                try:
+                                    from brokers.kite_adapter import KiteAdapter as _KA2
+                                    _KA2().place_options_order(_opts_sym, "SELL", config.NIFTY_LOT_SIZE)
+                                    st.toast(f"LIVE EXIT: SELL {_opts_sym}", icon="🔴")
+                                except Exception as _e2:
+                                    st.error(f"⚠️ Exit order failed: {_e2}\nClose manually on Kite!")
+                            else:
+                                st.warning("No options symbol stored — close position manually on Kite.")
                         close_trade(t["id"], _exit, "manual")
                         import notify as _n
                         _n.trade_closed(t["id"], _exit, "manual", _pnl)
@@ -751,6 +763,23 @@ def _approvals_tab():
                 if ba.button("✅ Approve", type="primary", use_container_width=True, key=f"app_{r['id']}"):
                     approve_signal(r["id"])
                     import notify
+                    # ── Live: place real options entry order ──────────────
+                    if config.load_settings().get("MODE") == "live":
+                        try:
+                            from brokers.kite_adapter import KiteAdapter as _KA
+                            from journal.db import update_signal_order
+                            _k   = _KA()
+                            _ltp = _k.get_ltp(config.NIFTY_SYMBOL)
+                            _contract = _k.get_options_contract(_ltp, r["zone_class"])
+                            _qty      = config.NIFTY_LOT_SIZE
+                            _oid      = _k.place_options_order(_contract["symbol"], "BUY", _qty)
+                            update_signal_order(r["id"], _oid, _contract["symbol"])
+                            st.toast(
+                                f"LIVE ORDER: BUY {_contract['symbol']} × {_qty} | "
+                                f"Order #{_oid}", icon="🔴"
+                            )
+                        except Exception as _e:
+                            st.error(f"⚠️ Order placement failed: {_e}\nApproval recorded but NO order placed on Kite.")
                     notify.trade_approved(r["id"], r["entry"], r["stop_loss"], r["intraday_target"])
                     st.toast(f"Signal #{r['id']} approved — trade is active.", icon="✅")
                     st.rerun()

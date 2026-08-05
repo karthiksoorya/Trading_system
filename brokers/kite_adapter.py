@@ -170,6 +170,54 @@ class KiteAdapter(BrokerBase):
         except Exception:
             return False
 
+    def get_options_contract(self, ltp: float, direction: str) -> dict:
+        """Find ATM weekly Nifty options contract. direction='demand'→CE, 'supply'→PE."""
+        from datetime import date, timedelta, datetime as dt
+        option_type = "CE" if direction == "demand" else "PE"
+        strike = round(ltp / 50) * 50
+
+        # Next Thursday expiry (Nifty weekly expires every Thursday)
+        today = date.today()
+        days_ahead = (3 - today.weekday()) % 7          # 3 = Thursday
+        if days_ahead == 0 and dt.now().strftime("%H:%M") >= "15:30":
+            days_ahead = 7                               # Today's expiry is past — use next
+        expiry = today + timedelta(days=days_ahead)
+
+        instruments = self._kite.instruments("NFO")
+        for inst in instruments:
+            if (inst.get("name") == "NIFTY"
+                    and inst.get("instrument_type") == option_type
+                    and inst.get("expiry") == expiry
+                    and inst.get("strike") == float(strike)):
+                return {
+                    "symbol":      inst["tradingsymbol"],
+                    "token":       inst["instrument_token"],
+                    "strike":      strike,
+                    "expiry":      expiry.isoformat(),
+                    "option_type": option_type,
+                }
+
+        raise ValueError(
+            f"NIFTY {option_type} strike {strike} expiry {expiry} not found in NFO instruments. "
+            "Check lot size or expiry date."
+        )
+
+    def place_options_order(self, symbol: str, action: str, quantity: int) -> str:
+        """Place MIS market order. action='BUY' or 'SELL'. Returns Kite order_id."""
+        tx = (self._kite.TRANSACTION_TYPE_BUY
+              if action == "BUY" else self._kite.TRANSACTION_TYPE_SELL)
+        order_id = self._kite.place_order(
+            variety=self._kite.VARIETY_REGULAR,
+            exchange=self._kite.EXCHANGE_NFO,
+            tradingsymbol=symbol,
+            transaction_type=tx,
+            quantity=quantity,
+            product=self._kite.PRODUCT_MIS,
+            order_type=self._kite.ORDER_TYPE_MARKET,
+        )
+        logger.info("Placed %s order for %s qty=%d → order_id=%s", action, symbol, quantity, order_id)
+        return str(order_id)
+
     def get_funds(self) -> dict:
         """Return available equity margin from Kite. Keys: cash, live_balance, used."""
         try:

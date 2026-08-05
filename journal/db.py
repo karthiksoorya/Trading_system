@@ -95,6 +95,13 @@ def _migrate(con):
         ("confluence_tfs",   "TEXT"),
         ("status",           "TEXT NOT NULL DEFAULT 'pending'"),
     ]
+    migrations = [
+        ("confluence_count", "INTEGER DEFAULT 1"),
+        ("confluence_tfs",   "TEXT"),
+        ("status",           "TEXT NOT NULL DEFAULT 'pending'"),
+        ("kite_order_id",    "TEXT"),
+        ("options_symbol",   "TEXT"),
+    ]
     for col, definition in migrations:
         if col not in existing:
             con.execute(f"ALTER TABLE signals ADD COLUMN {col} {definition}")
@@ -206,6 +213,15 @@ def _upsert_daily_summary(trade_date: str, pnl_points: float, result: str):
 
 
 # ── Read ──────────────────────────────────────────────────────────────────
+
+def update_signal_order(signal_id: int, kite_order_id: str, options_symbol: str) -> None:
+    """Store the live Kite order details after entry order is placed."""
+    with _conn() as con:
+        con.execute(
+            "UPDATE signals SET kite_order_id=?, options_symbol=? WHERE id=?",
+            (kite_order_id, options_symbol, signal_id),
+        )
+
 
 def get_signal(signal_id: int) -> Optional[sqlite3.Row]:
     with _conn() as con:

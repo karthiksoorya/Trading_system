@@ -277,16 +277,35 @@ def monitor_open_trades():
         stop_loss  = t["stop_loss"]
         target     = t["intraday_target"]
 
+        def _live_exit(trade: dict, reason: str):
+            """Place Kite SELL order for live trades. Logs error but never blocks close."""
+            if config.load_settings().get("MODE") != "live":
+                return
+            opts_sym = trade.get("options_symbol")
+            if not opts_sym:
+                logger.warning("Live exit skipped — no options_symbol for trade #%d", trade["id"])
+                notify._send(f"⚠️ Auto-exit #{trade['id']} ({reason}): no options symbol — close manually on Kite!")
+                return
+            try:
+                from brokers.kite_adapter import KiteAdapter
+                KiteAdapter().place_options_order(opts_sym, "SELL", config.NIFTY_LOT_SIZE)
+                logger.info("Live exit order placed: SELL %s (%s)", opts_sym, reason)
+            except Exception as ex:
+                logger.error("Live exit order FAILED for %s: %s", opts_sym, ex)
+                notify._send(f"⚠️ Exit order FAILED for {opts_sym} ({reason}): {ex}\nClose manually on Kite!")
+
         closed = False
         if zone_class == "demand":          # expecting price to rise
             if ltp >= target:
                 pnl = round(target - t["entry"], 2)
+                _live_exit(t, "target")
                 close_trade(tid, target, "target")
                 logger.info("AUTO-EXIT #%d TARGET hit at %.2f (LTP %.2f)", tid, target, ltp)
                 notify.trade_closed(tid, target, "target", pnl)
                 closed = True
             elif ltp <= stop_loss:
                 pnl = round(stop_loss - t["entry"], 2)
+                _live_exit(t, "stoploss")
                 close_trade(tid, stop_loss, "stoploss")
                 logger.info("AUTO-EXIT #%d STOPLOSS hit at %.2f (LTP %.2f)", tid, stop_loss, ltp)
                 notify.trade_closed(tid, stop_loss, "stoploss", pnl)
@@ -294,12 +313,14 @@ def monitor_open_trades():
         else:                               # supply — expecting price to fall
             if ltp <= target:
                 pnl = round(t["entry"] - target, 2)
+                _live_exit(t, "target")
                 close_trade(tid, target, "target")
                 logger.info("AUTO-EXIT #%d TARGET hit at %.2f (LTP %.2f)", tid, target, ltp)
                 notify.trade_closed(tid, target, "target", pnl)
                 closed = True
             elif ltp >= stop_loss:
                 pnl = round(t["entry"] - stop_loss, 2)
+                _live_exit(t, "stoploss")
                 close_trade(tid, stop_loss, "stoploss")
                 logger.info("AUTO-EXIT #%d STOPLOSS hit at %.2f (LTP %.2f)", tid, stop_loss, ltp)
                 notify.trade_closed(tid, stop_loss, "stoploss", pnl)

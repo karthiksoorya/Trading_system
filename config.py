@@ -26,6 +26,7 @@ MAX_RISK_PCT         = 0.01     # 1% of capital per day → ₹100
 MAX_TRADES_PER_DAY   = 4
 MIN_BOOSTER_SCORE    = 8        # Score < 8 → no trade
 MIN_CONFLUENCE       = 1        # minimum TFs in agreement to generate signal
+NIFTY_LOT_SIZE       = 75       # Nifty options lot size (NSE-defined, update if changed)
 
 # ── Instruments ────────────────────────────────────────────────────────────
 NIFTY_SYMBOL = "NSE:NIFTY 50"

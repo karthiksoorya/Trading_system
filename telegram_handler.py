@@ -99,6 +99,19 @@ def _handle_callback(cb: dict, token: str):
                     ltp = get_broker().get_ltp(config.NIFTY_SYMBOL)
                 except Exception:
                     ltp = match["entry"]
+                # ── Live: place real exit order ───────────────────────────
+                if config.load_settings().get("MODE") == "live":
+                    opts_sym = match.get("options_symbol")
+                    if opts_sym:
+                        try:
+                            from brokers.kite_adapter import KiteAdapter
+                            KiteAdapter().place_options_order(opts_sym, "SELL", config.NIFTY_LOT_SIZE)
+                            logger.info("Live exit order placed: SELL %s", opts_sym)
+                        except Exception as ex:
+                            notify._send(f"⚠️ Exit order FAILED for {opts_sym}: {ex}\nClose manually on Kite!")
+                            logger.error("Live exit order failed: %s", ex)
+                    else:
+                        notify._send(f"⚠️ No options symbol for trade #{trade_id} — close manually on Kite!")
                 pnl = round(
                     (ltp - match["entry"]) if match["zone_class"] == "demand"
                     else (match["entry"] - ltp), 2
