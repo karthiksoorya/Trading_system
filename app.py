@@ -421,8 +421,7 @@ with tab_engine:
             value=_auto_token,
             placeholder="http://127.0.0.1/?request_token=XXXXXX  OR  just XXXXXX",
         )
-        if st.form_submit_button("💾 Save Token", type="primary", use_container_width=True,
-                                  disabled=_token_today):
+        if st.form_submit_button("💾 Save Token", type="primary", use_container_width=True):
             token = _extract_token(raw_url)
             if not token:
                 st.error("Could not read token. Paste the full URL or the token value.")
