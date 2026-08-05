@@ -43,6 +43,37 @@ st.set_page_config(
     page_icon="📈",
     layout="wide",
 )
+
+# ── Login gate ────────────────────────────────────────────────────────────
+_APP_PASSWORD = os.getenv("APP_PASSWORD", "")
+
+if not st.session_state.get("authenticated"):
+    st.markdown(
+        """
+        <style>
+        .login-box { max-width: 360px; margin: 8rem auto 0; padding: 2rem;
+                     border: 1px solid #ddd; border-radius: 12px; }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+    with st.container():
+        st.markdown('<div class="login-box">', unsafe_allow_html=True)
+        st.markdown("## 🔐 Nifty Trading System")
+        st.caption("Enter your password to continue")
+        _pwd = st.text_input("Password", type="password", key="_login_pwd",
+                             label_visibility="collapsed", placeholder="Password")
+        if st.button("Login", type="primary", use_container_width=True):
+            if _APP_PASSWORD and _pwd == _APP_PASSWORD:
+                st.session_state["authenticated"] = True
+                st.rerun()
+            elif not _APP_PASSWORD:
+                st.error("APP_PASSWORD not set in .env — add it on the VPS.")
+            else:
+                st.error("Incorrect password.")
+        st.markdown('</div>', unsafe_allow_html=True)
+    st.stop()
+
 init_db()
 expire_stale_pending()
 expire_old_pending(config.load_settings().get("SIGNAL_EXPIRY_MINUTES", config.SIGNAL_EXPIRY_MINUTES))
@@ -132,6 +163,10 @@ with st.sidebar:
         st.rerun()
 
     st.caption(f"Updated: {datetime.now().strftime('%H:%M:%S')}")
+    st.divider()
+    if st.button("🚪 Logout", use_container_width=True):
+        st.session_state.clear()
+        st.rerun()
 
 # ── Engine panel ─────────────────────────────────────────────────────────
 
