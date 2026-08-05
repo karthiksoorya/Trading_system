@@ -96,6 +96,7 @@ def save_settings(overrides: dict):
     SETTINGS_FILE.write_text(json.dumps(current, indent=2))
 
 _s = load_settings()
+MODE                  = _s.get("MODE",                  MODE)
 SL_BUFFER_POINTS      = _s.get("SL_BUFFER_POINTS",      SL_BUFFER_POINTS)
 SIGNAL_EXPIRY_MINUTES = _s.get("SIGNAL_EXPIRY_MINUTES", SIGNAL_EXPIRY_MINUTES)
 MIN_BOOSTER_SCORE     = _s.get("MIN_BOOSTER_SCORE",     MIN_BOOSTER_SCORE)
