@@ -105,7 +105,8 @@ def _handle_callback(cb: dict, token: str):
                     if opts_sym:
                         try:
                             from brokers.kite_adapter import KiteAdapter
-                            KiteAdapter().place_options_order(opts_sym, "SELL", config.NIFTY_LOT_SIZE)
+                            _ka = KiteAdapter()
+                            _ka.place_options_order(opts_sym, "SELL", _ka.get_lot_size())
                             logger.info("Live exit order placed: SELL %s", opts_sym)
                         except Exception as ex:
                             notify._send(f"⚠️ Exit order FAILED for {opts_sym}: {ex}\nClose manually on Kite!")

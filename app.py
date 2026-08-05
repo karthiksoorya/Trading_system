@@ -662,7 +662,8 @@ def _approvals_tab():
                             if _opts_sym:
                                 try:
                                     from brokers.kite_adapter import KiteAdapter as _KA2
-                                    _KA2().place_options_order(_opts_sym, "SELL", config.NIFTY_LOT_SIZE)
+                                    _ka2 = _KA2()
+                                    _ka2.place_options_order(_opts_sym, "SELL", _ka2.get_lot_size())
                                     st.toast(f"LIVE EXIT: SELL {_opts_sym}", icon="🔴")
                                 except Exception as _e2:
                                     st.error(f"⚠️ Exit order failed: {_e2}\nClose manually on Kite!")
@@ -760,11 +761,11 @@ def _approvals_tab():
                             _k   = _KA()
                             _ltp = _k.get_ltp(config.NIFTY_SYMBOL)
                             _contract = _k.get_options_contract(_ltp, r["zone_class"])
-                            _qty      = config.NIFTY_LOT_SIZE
+                            _qty      = _contract["lot_size"]
                             _oid      = _k.place_options_order(_contract["symbol"], "BUY", _qty)
                             update_signal_order(r["id"], _oid, _contract["symbol"])
                             st.toast(
-                                f"LIVE ORDER: BUY {_contract['symbol']} × {_qty} | "
+                                f"LIVE ORDER: BUY {_contract['symbol']} × {_qty} lots | "
                                 f"Order #{_oid}", icon="🔴"
                             )
                         except Exception as _e:

@@ -288,7 +288,8 @@ def monitor_open_trades():
                 return
             try:
                 from brokers.kite_adapter import KiteAdapter
-                KiteAdapter().place_options_order(opts_sym, "SELL", config.NIFTY_LOT_SIZE)
+                _ka = KiteAdapter()
+                _ka.place_options_order(opts_sym, "SELL", _ka.get_lot_size())
                 logger.info("Live exit order placed: SELL %s (%s)", opts_sym, reason)
             except Exception as ex:
                 logger.error("Live exit order FAILED for %s: %s", opts_sym, ex)

@@ -195,12 +195,24 @@ class KiteAdapter(BrokerBase):
                     "strike":      strike,
                     "expiry":      expiry.isoformat(),
                     "option_type": option_type,
+                    "lot_size":    int(inst.get("lot_size", config.NIFTY_LOT_SIZE)),
                 }
 
         raise ValueError(
             f"NIFTY {option_type} strike {strike} expiry {expiry} not found in NFO instruments. "
             "Check lot size or expiry date."
         )
+
+    def get_lot_size(self) -> int:
+        """Return current Nifty lot size from Kite instruments (auto-updates when NSE revises)."""
+        try:
+            instruments = self._kite.instruments("NFO")
+            for inst in instruments:
+                if inst.get("name") == "NIFTY" and inst.get("instrument_type") in ("CE", "PE"):
+                    return int(inst.get("lot_size", config.NIFTY_LOT_SIZE))
+        except Exception:
+            pass
+        return config.NIFTY_LOT_SIZE   # fallback to hardcoded value
 
     def place_options_order(self, symbol: str, action: str, quantity: int) -> str:
         """Place MIS market order. action='BUY' or 'SELL'. Returns Kite order_id."""
