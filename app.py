@@ -203,8 +203,6 @@ def _extract_token(raw: str) -> str:
 # ── Sidebar ───────────────────────────────────────────────────────────────
 with st.sidebar:
     st.title("📈 Nifty System")
-    _sidebar_mode = config.load_settings().get("MODE", config.MODE).upper()
-    st.caption(f"Mode: **{_sidebar_mode}**")
     st.divider()
 
     engine_running = st.session_state.get("engine_on", is_engine_running())
@@ -213,6 +211,35 @@ with st.sidebar:
     st.metric("Pending",      f"🔔 {_pending} signal(s)" if _pending else "✅ None")
     st.metric("Trades Today", trades_today())
     st.metric("Daily P&L",    f"{daily_pnl():.2f} pts")
+    st.divider()
+
+    # ── Trading Mode switcher ─────────────────────────────────────────────
+    _sb_mode = config.load_settings().get("MODE", "paper")
+    if _sb_mode == "live":
+        st.error("🔴 LIVE MODE")
+    else:
+        st.success("🟢 PAPER MODE")
+
+    if _sb_mode == "paper":
+        if st.button("Switch to 🔴 LIVE", use_container_width=True):
+            st.session_state["_sb_switch_live"] = True
+        if st.session_state.get("_sb_switch_live"):
+            _confirm = st.text_input("Type LIVE to confirm", placeholder="LIVE", key="_sb_live_confirm")
+            if st.button("Confirm LIVE", type="primary", use_container_width=True):
+                if _confirm == "LIVE":
+                    config.save_settings({"MODE": "live"})
+                    st.session_state.pop("_sb_switch_live", None)
+                    st.success("Switched. Restart engine.")
+                    st.rerun()
+                else:
+                    st.error("Type LIVE exactly.")
+    else:
+        if st.button("Switch to 🟢 PAPER", use_container_width=True):
+            config.save_settings({"MODE": "paper"})
+            st.session_state["authenticated"] = False
+            st.success("Switched to Paper. Restart engine.")
+            st.rerun()
+
     st.divider()
 
     if st.button("🔄 Refresh page"):
@@ -479,51 +506,8 @@ with tab_engine:
 
     st.divider()
 
-    # ── Trading Mode ──────────────────────────────────────────────────────
-    st.subheader("5. Trading Mode")
-    _cur_mode = config.load_settings().get("MODE", "paper")
-
-    if _cur_mode == "live":
-        st.error("🔴 **LIVE MODE** — Real orders are being placed on Kite.")
-    else:
-        st.success("🟢 **PAPER MODE** — No real orders. Safe for testing.")
-
-    _new_mode = st.radio(
-        "Switch mode",
-        options=["paper", "live"],
-        index=0 if _cur_mode == "paper" else 1,
-        horizontal=True,
-        format_func=lambda x: "📄 Paper" if x == "paper" else "🔴 Live",
-        key="mode_radio",
-    )
-
-    if _new_mode != _cur_mode:
-        if _new_mode == "live":
-            st.warning(
-                "⚠️ **Live mode places real orders with real money.**\n\n"
-                "Make sure your Kite API app is configured for live trading and "
-                "you have sufficient margin. Type **LIVE** below to confirm."
-            )
-            _confirm = st.text_input("Type LIVE to confirm", placeholder="LIVE", key="live_confirm")
-            if st.button("🔴 Switch to LIVE", type="primary"):
-                if _confirm == "LIVE":
-                    config.save_settings({"MODE": "live"})
-                    st.success("Switched to LIVE mode. **Restart the engine** to apply.")
-                    st.rerun()
-                else:
-                    st.error("Type exactly LIVE (uppercase) to confirm.")
-        else:
-            if st.button("📄 Switch to PAPER", type="secondary"):
-                config.save_settings({"MODE": "paper"})
-                st.success("Switched to PAPER mode. **Restart the engine** to apply.")
-                st.rerun()
-    else:
-        st.caption("Engine restart required after any mode change.")
-
-    st.divider()
-
     # ── Backup ────────────────────────────────────────────────────────────
-    st.subheader("6. Backup")
+    st.subheader("5. Backup")
     col_db, col_csv = st.columns(2)
 
     with col_db:
