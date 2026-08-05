@@ -438,19 +438,9 @@ with tab_engine:
                     st.success("✅ Token saved. Engine is ready to start.")
                     st.rerun()
                 except Exception as e:
-                    err = str(e)
-                    if "invalid" in err.lower() or "expired" in err.lower():
-                        st.error(
-                            "❌ Token rejected by Kite. Three common causes:\n\n"
-                            "1. **Already used** — each request_token works only once. "
-                            "Go back to Step 1, click Login again to get a fresh URL.\n\n"
-                            "2. **Too slow** — the token expires in ~5 min after login. "
-                            "Paste it immediately after the browser shows the error page.\n\n"
-                            "3. **Wrong API secret** — check KITE_API_SECRET in your .env matches "
-                            "the secret shown in the Kite Developer Console for this app."
-                        )
-                    else:
-                        st.error(f"Token exchange failed: {e}")
+                    import traceback
+                    st.error(f"**{type(e).__name__}**: {e}")
+                    st.code(traceback.format_exc())
 
     st.divider()
 
