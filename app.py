@@ -400,6 +400,11 @@ with tab_engine:
         "Copy the full URL from the address bar and paste below "
         "(or just the token value after `request_token=`)."
     )
+
+    # Pre-flight: warn if API secret is missing
+    if not config.KITE_API_SECRET:
+        st.error("⚠️ KITE_API_SECRET is not set in your .env file. Token exchange will fail until this is fixed.")
+
     with st.form("_token_form"):
         raw_url = st.text_input(
             "Paste redirect URL or just the request_token value",
@@ -409,6 +414,8 @@ with tab_engine:
             token = _extract_token(raw_url)
             if not token:
                 st.error("Could not read token. Paste the full URL or the token value.")
+            elif not config.KITE_API_SECRET:
+                st.error("KITE_API_SECRET is missing in .env — cannot complete token exchange.")
             else:
                 try:
                     k.generate_session(token)
@@ -420,7 +427,19 @@ with tab_engine:
                     st.success("✅ Token saved. Engine is ready to start.")
                     st.rerun()
                 except Exception as e:
-                    st.error(f"Token exchange failed: {e}")
+                    err = str(e)
+                    if "invalid" in err.lower() or "expired" in err.lower():
+                        st.error(
+                            "❌ Token rejected by Kite. Three common causes:\n\n"
+                            "1. **Already used** — each request_token works only once. "
+                            "Go back to Step 1, click Login again to get a fresh URL.\n\n"
+                            "2. **Too slow** — the token expires in ~5 min after login. "
+                            "Paste it immediately after the browser shows the error page.\n\n"
+                            "3. **Wrong API secret** — check KITE_API_SECRET in your .env matches "
+                            "the secret shown in the Kite Developer Console for this app."
+                        )
+                    else:
+                        st.error(f"Token exchange failed: {e}")
 
     st.divider()
 
