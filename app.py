@@ -335,8 +335,8 @@ def _engine_panel():
 
 # ── Tabs ──────────────────────────────────────────────────────────────────
 _pending_label = f"🔔 Approvals ({pending_count()})" if pending_count() else "🔔 Approvals"
-tab_approvals, tab_engine, tab_signals, tab_performance, tab_learning = st.tabs([
-    _pending_label, "🔧 Engine", "📊 Signals", "📈 Performance", "🤖 Learning"
+tab_approvals, tab_engine, tab_signals, tab_performance, tab_learning, tab_tutorial = st.tabs([
+    _pending_label, "🔧 Engine", "📊 Signals", "📈 Performance", "🤖 Learning", "📖 Tutorial"
 ])
 
 
@@ -1211,3 +1211,189 @@ with tab_learning:
             st.info("Log file is empty — no learning events yet.")
     else:
         st.info("No learning log yet. It appears after the first 10 closed trades.")
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# TAB 6 — TUTORIAL
+# ══════════════════════════════════════════════════════════════════════════
+with tab_tutorial:
+    st.header("📖 Tutorial & Notes")
+    st.caption("Reference guide — everything learned while building and running this system.")
+
+    # ── Morning Checklist ─────────────────────────────────────────────────
+    with st.expander("☀️ Daily Morning Checklist", expanded=True):
+        st.markdown("""
+**Do this every trading day before 9:15 AM:**
+
+1. Open dashboard → **Engine tab**
+2. Click **"📲 Send login link to Telegram & auto-capture"**
+3. Tap the Kite login link in Telegram on your phone
+4. Login with password + TOTP (6-digit authenticator code)
+5. Phone shows *"Token captured. You can close this tab."*
+6. Dashboard shows ✅ Token captured
+7. Click **Start Engine**
+8. Sidebar shows 🟢 Running
+
+> **Note:** Token must be generated fresh every day — Kite expires it at midnight. No way to automate the login itself (SEBI requirement).
+        """)
+
+    # ── Understanding Signals ─────────────────────────────────────────────
+    with st.expander("📡 Understanding Signals"):
+        st.markdown("""
+**Signal = a zone the engine found worth trading.**
+
+You receive a Telegram message with:
+- Zone type, timeframe, entry price, stop loss, target
+- Booster score (8–10) and confluence (how many TFs agree)
+- Inline ✅ Approve / ❌ Reject buttons
+
+**Zone Types:**
+| Type | Full Name | Class | Bias |
+|------|-----------|-------|------|
+| DBR | Drop-Base-Rally | Demand | Long (buy) |
+| RBR | Rally-Base-Rally | Demand | Long (buy) |
+| RBD | Rally-Base-Drop | Supply | Short (sell) |
+| DBD | Drop-Base-Drop | Supply | Short (sell) |
+
+**Booster Score (out of 10):**
+- 8 = valid setup
+- 9 = good setup (current setting)
+- 10 = perfect setup (very rare)
+
+**Confluence:** Number of timeframes (5min, 15min, 60min) where a zone exists at the same price. Higher = stronger signal.
+        """)
+
+    # ── Settings Guide ────────────────────────────────────────────────────
+    with st.expander("⚙️ Settings — What Each One Does"):
+        st.markdown("""
+**Current recommended settings (as of paper trading results):**
+
+| Setting | Value | Why |
+|---------|-------|-----|
+| Entry Timeframe | 5minute | Best signal volume and accuracy |
+| Min Booster Score | 9 | Filters weak setups, keeps quality |
+| Min Confluence | 1 | Set to 1 after zero-signal week — confluence=2 was too strict |
+| Zone Approach | 100 pts | Fires signal when LTP is within 100 pts of zone |
+| Signal Expiry | 45 min | Pending signals older than 45 min are auto-expired |
+| SL Buffer | 5 pts | Extra buffer beyond zone distal to avoid wick stop-outs |
+| Zone Classes | Demand only | Supply zones underperformed — demand-only currently |
+| Scan Window | 09:15–15:25 | Full day; consider 10:00–15:25 to skip opening noise |
+
+**Why confluence was set to 1:**
+Engine produced zero signals for a week. Log showed *"Skipped — confluence 1 < min 2 required"*
+for every zone. Only 2 valid 60min zones existed and none overlapped with 15min zones.
+Reduced to 1 to allow single-TF signals.
+        """)
+
+    # ── Time of Day Insights ──────────────────────────────────────────────
+    with st.expander("🕐 Time of Day — What the Data Shows"):
+        st.markdown("""
+**Analysis of 36 paper trades (as of Aug 2026):**
+
+| Hour | Trades | Win% | Avg P&L | Note |
+|------|--------|------|---------|------|
+| 09:xx | 3 | 67% | 43.9 pts | Too few trades to conclude |
+| 10:xx | 12 | 75% | 39.5 pts | High volume, solid |
+| 11:xx | 9 | 78% | 48.2 pts | Strong |
+| 12:xx | 4 | 50% | 8.8 pts | ⚠️ Weakest — lunch hour chop |
+| 13:xx | 1 | 100% | 52.0 pts | Too few trades |
+| 14:xx | 6 | 83% | 63.5 pts | ⭐ Best hour |
+| 15:xx | 1 | 100% | 37.0 pts | Too few trades |
+
+**Key insight:** Afternoon (14:xx) is the best performing hour — highest win rate AND highest average P&L.
+Midday (12:xx) is the weakest — classic lunch-hour market choppiness.
+
+**Action:** Consider setting Scan Window to skip 12:00–12:59 once you have more data to confirm.
+        """)
+
+    # ── Going Live ────────────────────────────────────────────────────────
+    with st.expander("🔴 Going Live — Checklist & Notes"):
+        st.markdown("""
+**Before switching to Live mode:**
+
+- [ ] 20+ paper trades logged with positive results
+- [ ] Win rate consistently above 50%
+- [ ] System running without crashes for 5+ trading days
+- [ ] Kite static IP registered (SEBI requirement from April 2026)
+- [ ] Sufficient margin in Kite account (check sidebar when in Live mode)
+- [ ] Kite redirect URL updated to `http://13.201.210.4:5000/`
+- [ ] Port 5000 open in AWS Lightsail firewall
+
+**How to switch:**
+Sidebar → "Switch to 🔴 LIVE" → type `LIVE` → Confirm → Restart engine on VPS
+
+**After switching to Live:**
+- Dashboard requires OTP login (sent to Telegram)
+- Sidebar shows Available Margin from Kite in real time
+- Approving a signal places a REAL order on Kite
+
+**SEBI Static IP rule (April 2026):**
+All API orders must come from a registered static IP.
+AWS Lightsail provides a permanent static IP (13.201.210.4).
+Register it at: Kite profile → API section.
+        """)
+
+    # ── Troubleshooting ───────────────────────────────────────────────────
+    with st.expander("🔧 Troubleshooting"):
+        st.markdown("""
+**No signals for days:**
+- Check logs: `sudo journalctl -u trading -n 100`
+- Most common cause: confluence filter too strict → set Min Confluence to 1
+- Also check Zone Approach — if too tight (< 50 pts), zones are skipped as too far
+- Verify engine is actually running (sidebar shows 🟢)
+
+**Token expired error:**
+- Kite token is valid for one calendar day only
+- Regenerate token every morning before market opens
+- If engine crashes mid-day, regenerate token and restart
+
+**Data loss warning:**
+- Never run `git reset --hard` on VPS without backing up `data/trades.db` first
+- Backup command: `cp ~/Trading_system/data/trades.db ~/trades_backup_$(date +%Y%m%d).db`
+- Or use the Telegram backup button in Engine tab → Backup section
+
+**Engine not stopping:**
+- Engine stop works via flag in settings.json (not kill signal)
+- If stuck: `sudo systemctl restart trading` will force restart
+
+**transfer.sh / file upload blocked:**
+- Indian ISPs block transfer.sh — use SCP with Lightsail .pem key instead
+- `scp -i ~/lightsail.pem ubuntu@13.201.210.4:~/Trading_system/data/trades.db .`
+
+**Auto-learn disabled everything:**
+- Go to 🤖 Learning tab → Re-enable section
+- Re-enable items one by one and monitor results carefully
+        """)
+
+    # ── VPS Quick Reference ───────────────────────────────────────────────
+    with st.expander("🖥️ VPS Quick Reference"):
+        st.markdown("""
+**Server:** AWS Lightsail Mumbai | IP: 13.201.210.4 | User: ubuntu
+
+**Common commands:**
+```bash
+# Check engine status
+sudo systemctl status trading
+
+# Restart engine
+sudo systemctl restart trading
+
+# View live logs
+sudo journalctl -u trading -f
+
+# Backup trades DB
+cp ~/Trading_system/data/trades.db ~/trades_backup_$(date +%Y%m%d).db
+
+# Pull latest code and restart
+cd ~/Trading_system && git pull && sudo systemctl restart trading
+
+# Check public IP
+curl -s ifconfig.me
+```
+
+**Ports open in Lightsail firewall:**
+- 8501 — Streamlit dashboard
+- 5000 — Kite token auto-capture (open this before going live)
+        """)
+
+    st.info("💡 Add new learnings here as you trade — this tab is your permanent reference guide.")
