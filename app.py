@@ -787,17 +787,20 @@ def _approvals_tab():
                             from brokers.kite_adapter import KiteAdapter as _KA
                             from journal.db import update_signal_order
                             _k   = _KA()
-                            _ltp = _k.get_ltp(config.NIFTY_SYMBOL)
-                            _contract = _k.get_options_contract(_ltp, r["zone_class"])
-                            _qty      = _contract["lot_size"]
-                            _oid      = _k.place_options_order(_contract["symbol"], "BUY", _qty)
-                            update_signal_order(r["id"], _oid, _contract["symbol"])
-                            st.toast(
-                                f"LIVE ORDER: BUY {_contract['symbol']} × {_qty} lots | "
-                                f"Order #{_oid}", icon="🔴"
-                            )
+                            if not _k._token_loaded:
+                                st.toast("⚠️ No Kite token — approval saved but NO real order placed. Go to Engine tab and save today's token first.", icon="⚠️")
+                            else:
+                                _ltp = _k.get_ltp(config.NIFTY_SYMBOL)
+                                _contract = _k.get_options_contract(_ltp, r["zone_class"])
+                                _qty      = _contract["lot_size"]
+                                _oid      = _k.place_options_order(_contract["symbol"], "BUY", _qty)
+                                update_signal_order(r["id"], _oid, _contract["symbol"])
+                                st.toast(
+                                    f"🔴 LIVE ORDER PLACED: BUY {_contract['symbol']} × {_qty} lots | "
+                                    f"Order #{_oid}", icon="🔴"
+                                )
                         except Exception as _e:
-                            st.error(f"⚠️ Order placement failed: {_e}\nApproval recorded but NO order placed on Kite.")
+                            st.toast(f"⚠️ Order placement failed: {_e} — NO order placed on Kite.", icon="⚠️")
                     notify.trade_approved(r["id"], r["entry"], r["stop_loss"], r["intraday_target"])
                     st.toast(f"Signal #{r['id']} approved — trade is active.", icon="✅")
                     st.rerun()
