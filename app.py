@@ -844,6 +844,7 @@ with tab_signals:
             "booster_score", "confluence_count", "confluence_tfs",
             "entry_type", "position_size",
             "exit_price", "exit_reason", "pnl_points", "result",
+            "kite_order_id", "options_symbol",
         ]
         display_cols = [c for c in display_cols if c in df.columns]
 
