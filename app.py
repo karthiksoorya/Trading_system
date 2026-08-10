@@ -69,9 +69,8 @@ def _send_login_otp() -> str:
 
 
 _current_mode = config.load_settings().get("MODE", "paper")
-_is_live_mode = _current_mode == "live"
+_is_live_mode = False   # OTP gate temporarily disabled
 
-# OTP gate: only for live mode. Paper mode opens freely (no login required).
 if _is_live_mode and not st.session_state.get("authenticated"):
     st.markdown(
         """
