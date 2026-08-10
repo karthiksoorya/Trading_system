@@ -482,29 +482,55 @@ with tab_engine:
     st.subheader("4. Live Connection Check")
     st.caption("Verify Kite API is reachable and data is correct before trading.")
     if st.button("🔍 Run Check", use_container_width=True, disabled=not token_ok):
-        try:
-            from brokers.kite_adapter import KiteAdapter as _KAC
-            _kc = _KAC()
-            with st.spinner("Fetching from Kite..."):
-                # Funds
+        from brokers.kite_adapter import KiteAdapter as _KAC
+        _kc = _KAC()
+        with st.spinner("Fetching from Kite..."):
+            # Funds
+            try:
                 _funds = _kc.get_funds()
-                # Nifty LTP
+                _funds_ok = True
+            except Exception as _fe:
+                _funds = {}
+                _funds_ok = False
+                _funds_err = str(_fe)
+
+            # Nifty LTP
+            try:
                 _ltp = _kc.get_ltp(config.NIFTY_SYMBOL)
-                # Next contract
-                _contract = _kc.get_options_contract(_ltp, "demand")
+                _ltp_ok = True
+            except Exception as _le:
+                _ltp = 0.0
+                _ltp_ok = False
+                _ltp_err = str(_le)
 
-            f1, f2, f3 = st.columns(3)
+            # Next contract (may not be available outside market hours)
+            try:
+                _contract = _kc.get_options_contract(_ltp or 0, "demand")
+                _contract_ok = True
+            except Exception as _ce:
+                _contract = {}
+                _contract_ok = False
+                _contract_err = str(_ce)
+
+        f1, f2 = st.columns(2)
+        if _funds_ok:
             f1.metric("Available Cash", f"₹{_funds.get('cash', 0):,.0f}")
-            f2.metric("Nifty LTP", f"{_ltp:,.1f}")
-            f3.metric("Lot Size", _contract["lot_size"])
+        else:
+            f1.error(f"Funds: {_funds_err}")
 
+        if _ltp_ok:
+            f2.metric("Nifty LTP", f"{_ltp:,.1f}")
+        else:
+            f2.error(f"LTP: {_ltp_err}")
+
+        if _contract_ok:
             st.success(
                 f"**Next Contract:** {_contract['symbol']} | "
                 f"Strike {_contract['strike']} {_contract['option_type']} | "
-                f"Expiry {_contract['expiry']}"
+                f"Expiry {_contract['expiry']} | Lot size {_contract['lot_size']}"
             )
-        except Exception as _ce:
-            st.error(f"Connection check failed: {_ce}")
+        else:
+            st.warning(f"Contract lookup: {_contract_err} — normal outside market hours.")
 
     st.divider()
 
