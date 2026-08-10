@@ -478,6 +478,36 @@ with tab_engine:
 
     st.divider()
 
+    # ── Live Connection Check ─────────────────────────────────────────────
+    st.subheader("4. Live Connection Check")
+    st.caption("Verify Kite API is reachable and data is correct before trading.")
+    if st.button("🔍 Run Check", use_container_width=True, disabled=not token_ok):
+        try:
+            from brokers.kite_adapter import KiteAdapter as _KAC
+            _kc = _KAC()
+            with st.spinner("Fetching from Kite..."):
+                # Funds
+                _funds = _kc.get_funds()
+                # Nifty LTP
+                _ltp = _kc.get_ltp(config.NIFTY_SYMBOL)
+                # Next contract
+                _contract = _kc.get_options_contract(_ltp, "demand")
+
+            f1, f2, f3 = st.columns(3)
+            f1.metric("Available Cash", f"₹{_funds.get('cash', 0):,.0f}")
+            f2.metric("Nifty LTP", f"{_ltp:,.1f}")
+            f3.metric("Lot Size", _contract["lot_size"])
+
+            st.success(
+                f"**Next Contract:** {_contract['symbol']} | "
+                f"Strike {_contract['strike']} {_contract['option_type']} | "
+                f"Expiry {_contract['expiry']}"
+            )
+        except Exception as _ce:
+            st.error(f"Connection check failed: {_ce}")
+
+    st.divider()
+
     # ── Settings ──────────────────────────────────────────────────────────
     st.subheader("4. Settings")
     st.caption("Changes take effect on the next engine start.")
