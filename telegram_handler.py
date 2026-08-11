@@ -65,15 +65,34 @@ def _handle_callback(cb: dict, token: str):
     try:
         if action.startswith("approve_"):
             sig_id = int(action.split("_", 1)[1])
-            from journal.db import get_open_trades, approve_signal, get_signal
-            import notify
+            from journal.db import get_open_trades, approve_signal, get_signal, update_signal_order
+            import notify, config
             if get_open_trades():
                 answer = "⚠️ Already have an open trade — reject it first."
             else:
                 approve_signal(sig_id)
-                answer = f"✅ Signal #{sig_id} approved!"
                 logger.info("Telegram approved signal #%d", sig_id)
                 row = get_signal(sig_id)
+                # ── Live: place real options entry order ──────────────────
+                order_note = ""
+                if config.load_settings().get("MODE") == "live" and row:
+                    try:
+                        from brokers.kite_adapter import KiteAdapter
+                        _k = KiteAdapter()
+                        if not _k._token_loaded:
+                            order_note = "\n⚠️ No Kite token — NO real order placed. Save token in dashboard first."
+                        else:
+                            _ltp      = _k.get_ltp(config.NIFTY_SYMBOL)
+                            _contract = _k.get_options_contract(_ltp, row["zone_class"])
+                            _qty      = _contract["lot_size"]
+                            _oid      = _k.place_options_order(_contract["symbol"], "BUY", _qty)
+                            update_signal_order(sig_id, _oid, _contract["symbol"])
+                            order_note = f"\n🔴 LIVE ORDER: BUY {_contract['symbol']} ×{_qty} | Order #{_oid}"
+                            logger.info("Live entry order placed: %s order #%s", _contract["symbol"], _oid)
+                    except Exception as _oe:
+                        order_note = f"\n⚠️ Order FAILED: {_oe} — close manually on Kite!"
+                        logger.error("Live entry order failed for signal #%d: %s", sig_id, _oe)
+                answer = f"✅ Signal #{sig_id} approved!{order_note}"
                 if row:
                     notify.trade_approved(sig_id, row["entry"], row["stop_loss"], row["intraday_target"])
 
