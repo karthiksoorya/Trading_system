@@ -258,6 +258,25 @@ def _scan_core():
             )
 
 
+def _live_exit(trade: dict, reason: str):
+    """Place Kite SELL order for live trades. Logs error but never blocks close."""
+    if config.load_settings().get("MODE") != "live":
+        return
+    opts_sym = trade.get("options_symbol")
+    if not opts_sym:
+        logger.warning("Live exit skipped — no options_symbol for trade #%d", trade["id"])
+        notify._send(f"⚠️ Exit #{trade['id']} ({reason}): no options symbol — close manually on Kite!")
+        return
+    try:
+        from brokers.kite_adapter import KiteAdapter
+        _ka = KiteAdapter()
+        _ka.place_options_order(opts_sym, "SELL", _ka.get_lot_size())
+        logger.info("Live exit order placed: SELL %s (%s)", opts_sym, reason)
+    except Exception as ex:
+        logger.error("Live exit order FAILED for %s: %s", opts_sym, ex)
+        notify._send(f"⚠️ Exit order FAILED for {opts_sym} ({reason}): {ex}\nClose manually on Kite!")
+
+
 def monitor_open_trades():
     """Check all approved open trades against current LTP. Auto-exit on target or SL hit."""
     open_trades = get_open_trades()
@@ -276,24 +295,6 @@ def monitor_open_trades():
         zone_class = t["zone_class"]
         stop_loss  = t["stop_loss"]
         target     = t["intraday_target"]
-
-        def _live_exit(trade: dict, reason: str):
-            """Place Kite SELL order for live trades. Logs error but never blocks close."""
-            if config.load_settings().get("MODE") != "live":
-                return
-            opts_sym = trade.get("options_symbol")
-            if not opts_sym:
-                logger.warning("Live exit skipped — no options_symbol for trade #%d", trade["id"])
-                notify._send(f"⚠️ Auto-exit #{trade['id']} ({reason}): no options symbol — close manually on Kite!")
-                return
-            try:
-                from brokers.kite_adapter import KiteAdapter
-                _ka = KiteAdapter()
-                _ka.place_options_order(opts_sym, "SELL", _ka.get_lot_size())
-                logger.info("Live exit order placed: SELL %s (%s)", opts_sym, reason)
-            except Exception as ex:
-                logger.error("Live exit order FAILED for %s: %s", opts_sym, ex)
-                notify._send(f"⚠️ Exit order FAILED for {opts_sym} ({reason}): {ex}\nClose manually on Kite!")
 
         closed = False
         if zone_class == "demand":          # expecting price to rise
@@ -376,6 +377,7 @@ def end_of_day():
         for row in open_trades:
             t = dict(row)
             exit_price = ltp or t["entry"]   # fallback to entry if LTP unavailable
+            _live_exit(t, "eod")
             close_trade(t["id"], exit_price, "eod")
             logger.info("EOD close #%d at %.2f", t["id"], exit_price)
 
