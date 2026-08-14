@@ -206,6 +206,16 @@ class KiteAdapter(BrokerBase):
 
         instruments = self._get_instruments("NFO")
 
+        def _norm_expiry(val):
+            """Normalise kiteconnect expiry to date regardless of type."""
+            if val is None:
+                return None
+            if hasattr(val, "date"):        # datetime → date
+                return val.date()
+            if isinstance(val, str):
+                return date.fromisoformat(val[:10])
+            return val                      # already a date
+
         # Try current week expiry first, then next week as fallback
         for expiry_try in [expiry, expiry + timedelta(days=7)]:
             for inst in instruments:
@@ -215,13 +225,7 @@ class KiteAdapter(BrokerBase):
                     continue
                 if inst.get("strike") != float(strike):
                     continue
-                # Normalise: kiteconnect may return expiry as date, datetime, or string
-                inst_expiry = inst.get("expiry")
-                if hasattr(inst_expiry, "date"):          # datetime → date
-                    inst_expiry = inst_expiry.date()
-                elif isinstance(inst_expiry, str):
-                    inst_expiry = date.fromisoformat(inst_expiry[:10])
-                if inst_expiry == expiry_try:
+                if _norm_expiry(inst.get("expiry")) == expiry_try:
                     return {
                         "symbol":      inst["tradingsymbol"],
                         "token":       inst["instrument_token"],
@@ -232,9 +236,21 @@ class KiteAdapter(BrokerBase):
                     }
             logger.warning("NIFTY %s strike %s expiry %s not in NFO — trying next week", option_type, strike, expiry_try)
 
+        # Diagnostic: log what IS available so we can debug the mismatch
+        sample = [
+            (inst.get("tradingsymbol"), inst.get("expiry"), type(inst.get("expiry")).__name__, inst.get("strike"))
+            for inst in instruments
+            if inst.get("name") == "NIFTY" and inst.get("instrument_type") == option_type
+        ]
+        expiries_found = sorted({_norm_expiry(inst.get("expiry")) for inst in instruments if inst.get("name") == "NIFTY"})
+        logger.error("NIFTY %s contract not found. Looking for strike=%s expiry=%s or %s",
+                     option_type, strike, expiry, expiry + timedelta(days=7))
+        logger.error("Expiry dates found in NFO instruments for NIFTY: %s", expiries_found[:10])
+        logger.error("Sample NIFTY %s instruments (first 5): %s", option_type, sample[:5])
+
         raise ValueError(
             f"NIFTY {option_type} strike {strike} not found for expiry {expiry} "
-            f"or {expiry + timedelta(days=7)}. Instruments may need refresh."
+            f"or {expiry + timedelta(days=7)}. Check logs for available expiries."
         )
 
     def get_lot_size(self) -> int:
