@@ -83,8 +83,7 @@ def _handle_callback(cb: dict, token: str):
                         if not _k._token_loaded:
                             order_note = "\n⚠️ No Kite token — NO real order placed. Save token in dashboard first."
                         else:
-                            _ltp      = _k.get_ltp(config.NIFTY_SYMBOL)
-                            _contract = _k.get_options_contract(_ltp, row["zone_class"])
+                            _contract = _k.get_options_contract(row["entry"], row["zone_class"])
                             _qty      = _contract["lot_size"]
                             _oid      = _k.place_options_order(_contract["symbol"], "BUY", _qty)
                             update_signal_order(sig_id, _oid, _contract["symbol"])
