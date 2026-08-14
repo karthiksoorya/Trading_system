@@ -345,14 +345,14 @@ def approve_signal(signal_id: int):
     logger.info("Signal #%d approved.", signal_id)
 
 
-def reject_signal(signal_id: int):
-    """User rejected the signal — skip it."""
+def reject_signal(signal_id: int, note: str = ""):
+    """User rejected the signal — skip it. Pass note for auto-rejections."""
     with _conn() as con:
         con.execute(
-            "UPDATE signals SET status = 'rejected' WHERE id = ?",
-            (signal_id,),
+            "UPDATE signals SET status = 'rejected', notes = COALESCE(NULLIF(?, ''), notes) WHERE id = ?",
+            (note, signal_id),
         )
-    logger.info("Signal #%d rejected.", signal_id)
+    logger.info("Signal #%d rejected. %s", signal_id, note)
 
 
 def daily_pnl(trade_date: Optional[str] = None) -> float:

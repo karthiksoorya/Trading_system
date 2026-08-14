@@ -90,8 +90,13 @@ def _handle_callback(cb: dict, token: str):
                             order_note = f"\n🔴 LIVE ORDER: BUY {_contract['symbol']} ×{_qty} | Order #{_oid}"
                             logger.info("Live entry order placed: %s order #%s", _contract["symbol"], _oid)
                     except Exception as _oe:
-                        order_note = f"\n⚠️ Order FAILED: {_oe} — close manually on Kite!"
+                        from journal.db import reject_signal
+                        _fail_note = f"Order failed: {_oe}"
+                        reject_signal(sig_id, _fail_note)
                         logger.error("Live entry order failed for signal #%d: %s", sig_id, _oe)
+                        answer = f"❌ Signal #{sig_id} order FAILED — auto-rejected.\n{_oe}\nApprove the next signal."
+                        notify._send(answer)
+                        return
                 answer = f"✅ Signal #{sig_id} approved!{order_note}"
                 if row:
                     notify.trade_approved(sig_id, row["entry"], row["stop_loss"], row["intraday_target"])

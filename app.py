@@ -855,7 +855,11 @@ def _approvals_tab():
                                     f"Order #{_oid}", icon="🔴"
                                 )
                         except Exception as _e:
-                            st.toast(f"⚠️ Order placement failed: {_e} — NO order placed on Kite.", icon="⚠️")
+                            from journal.db import reject_signal
+                            reject_signal(r["id"], f"Order failed: {_e}")
+                            st.toast(f"❌ Order failed — signal #{r['id']} auto-rejected. Approve next signal.\n{_e}", icon="❌")
+                            st.rerun()
+                            st.stop()
                     notify.trade_approved(r["id"], r["entry"], r["stop_loss"], r["intraday_target"])
                     st.toast(f"Signal #{r['id']} approved — trade is active.", icon="✅")
                     st.rerun()
