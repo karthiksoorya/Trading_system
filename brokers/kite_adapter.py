@@ -204,23 +204,37 @@ class KiteAdapter(BrokerBase):
             days_ahead = 7                               # Today's expiry is past — use next
         expiry = today + timedelta(days=days_ahead)
 
-        for inst in self._get_instruments("NFO"):
-            if (inst.get("name") == "NIFTY"
-                    and inst.get("instrument_type") == option_type
-                    and inst.get("expiry") == expiry
-                    and inst.get("strike") == float(strike)):
-                return {
-                    "symbol":      inst["tradingsymbol"],
-                    "token":       inst["instrument_token"],
-                    "strike":      strike,
-                    "expiry":      expiry.isoformat(),
-                    "option_type": option_type,
-                    "lot_size":    int(inst.get("lot_size", config.NIFTY_LOT_SIZE)),
-                }
+        instruments = self._get_instruments("NFO")
+
+        # Try current week expiry first, then next week as fallback
+        for expiry_try in [expiry, expiry + timedelta(days=7)]:
+            for inst in instruments:
+                if inst.get("name") != "NIFTY":
+                    continue
+                if inst.get("instrument_type") != option_type:
+                    continue
+                if inst.get("strike") != float(strike):
+                    continue
+                # Normalise: kiteconnect may return expiry as date, datetime, or string
+                inst_expiry = inst.get("expiry")
+                if hasattr(inst_expiry, "date"):          # datetime → date
+                    inst_expiry = inst_expiry.date()
+                elif isinstance(inst_expiry, str):
+                    inst_expiry = date.fromisoformat(inst_expiry[:10])
+                if inst_expiry == expiry_try:
+                    return {
+                        "symbol":      inst["tradingsymbol"],
+                        "token":       inst["instrument_token"],
+                        "strike":      strike,
+                        "expiry":      expiry_try.isoformat(),
+                        "option_type": option_type,
+                        "lot_size":    int(inst.get("lot_size", config.NIFTY_LOT_SIZE)),
+                    }
+            logger.warning("NIFTY %s strike %s expiry %s not in NFO — trying next week", option_type, strike, expiry_try)
 
         raise ValueError(
-            f"NIFTY {option_type} strike {strike} expiry {expiry} not found in NFO instruments. "
-            "Check lot size or expiry date."
+            f"NIFTY {option_type} strike {strike} not found for expiry {expiry} "
+            f"or {expiry + timedelta(days=7)}. Instruments may need refresh."
         )
 
     def get_lot_size(self) -> int:
