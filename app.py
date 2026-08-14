@@ -1420,7 +1420,7 @@ with tab_learning:
 # ══════════════════════════════════════════════════════════════════════════
 with tab_tutorial:
     st.header("📖 Tutorial & Notes")
-    st.caption("Reference guide — everything learned while building and running this system.")
+    st.caption("Reference guide — accurate as of August 2026.")
 
     # ── Morning Checklist ─────────────────────────────────────────────────
     with st.expander("☀️ Daily Morning Checklist", expanded=True):
@@ -1428,15 +1428,14 @@ with tab_tutorial:
 **Do this every trading day before 9:15 AM:**
 
 1. Open dashboard → **Engine tab**
-2. Click **"🔑 Login to Kite"** button in the Engine tab
-3. Login with your Kite password + TOTP (6-digit authenticator code)
-4. Browser shows *"Site can't be reached"* — that's expected
-5. Copy the full URL from the address bar and paste it in **Step 2**
-6. Click **Save Token** → dashboard shows ✅ Token valid
-7. Click **Start Engine**
-8. Sidebar shows 🟢 Running
+2. Click **"🔑 Login to Kite"** — opens Kite login page in a new tab
+3. Login with Kite password + TOTP (6-digit authenticator code)
+4. Kite redirects back to the dashboard — token is auto-captured
+5. Dashboard shows ✅ **Token valid for today**
+6. Click **▶ Start Engine** — sidebar shows 🟢 Running
 
-> **Note:** Token must be generated fresh every day — Kite expires it at midnight. No way to automate the login itself (SEBI requirement).
+> **Token expires every day at midnight** (SEBI requirement — cannot be automated).
+> If you miss the morning login, the engine runs but live orders will fail silently.
         """)
 
     # ── Understanding Signals ─────────────────────────────────────────────
@@ -1446,125 +1445,153 @@ with tab_tutorial:
 
 You receive a Telegram message with:
 - Zone type, timeframe, entry price, stop loss, target
-- Booster score (8–10) and confluence (how many TFs agree)
-- Inline ✅ Approve / ❌ Reject buttons
+- Booster score and confluence (how many TFs agree)
+- ✅ Approve / ❌ Reject buttons
+- ⚠️ Expiry day warning if today is Tuesday (next week's contract will be used)
 
 **Zone Types:**
 | Type | Full Name | Class | Bias |
 |------|-----------|-------|------|
-| DBR | Drop-Base-Rally | Demand | Long (buy) |
-| RBR | Rally-Base-Rally | Demand | Long (buy) |
-| RBD | Rally-Base-Drop | Supply | Short (sell) |
-| DBD | Drop-Base-Drop | Supply | Short (sell) |
+| DBR | Drop-Base-Rally | Demand | Buy CE |
+| RBR | Rally-Base-Rally | Demand | Buy CE |
+| RBD | Rally-Base-Drop | Supply | Buy PE |
+| DBD | Drop-Base-Drop | Supply | Buy PE |
 
-**Booster Score (out of 10):**
-- 8 = valid setup
-- 9 = good setup (current setting)
-- 10 = perfect setup (very rare)
+**Confluence:** Number of timeframes (5min, 15min, 60min) agreeing at the same price.
+Higher = stronger signal.
 
-**Confluence:** Number of timeframes (5min, 15min, 60min) where a zone exists at the same price. Higher = stronger signal.
+**Trend filter:** Demand zones (CE) are only signalled when 60min trend is UP.
+Supply zones (PE) only when 60min trend is DOWN. No counter-trend trades.
+
+**Same zone can appear multiple times** if previous attempts were rejected.
+Always approve or reject — never leave a signal pending.
+        """)
+
+    # ── Live Order Flow ───────────────────────────────────────────────────
+    with st.expander("🔴 Live Order Flow — What Happens When You Approve"):
+        st.markdown("""
+**Exact sequence when you tap ✅ Approve on Telegram:**
+
+1. **Entry validation** — checks if Nifty is still near the signal's entry price
+   - Tolerance = 50% of SL distance (max 20 pts)
+   - If price moved too far in the wrong direction → signal auto-rejected, try next
+
+2. **Contract selection** — finds ATM options contract
+   - Strike = signal's entry price rounded to nearest 50
+   - Expiry = next Tuesday (NSE changed Nifty weekly expiry from Thursday → Tuesday)
+   - Tuesday itself → uses NEXT week (never same-day expiry)
+
+3. **Limit order placed on Kite**
+   - BUY at option LTP + 2 pts (rounded to tick 0.05)
+   - Falls back to market order only if option LTP unavailable
+   - kite_order_id stored in DB and visible in Signals tab
+
+4. **Trade monitored every 1 minute**
+   - Target hit → SELL limit order placed automatically
+   - Stop loss hit → SELL limit order placed automatically
+   - 15:20 EOD → SELL limit order placed, CSV exported
+
+**If order fails:**
+- Signal is auto-rejected (you can approve the next one immediately)
+- Telegram sends failure reason
+- Failure reason saved in DB notes column
+
+**Important:** After approval, check your **Kite app** to confirm the order appeared.
+If kite_order_id is empty in Signals tab → order was never placed.
+        """)
+
+    # ── Nifty Options — Key Facts ─────────────────────────────────────────
+    with st.expander("📋 Nifty Options — Key Facts"):
+        st.markdown("""
+**Expiry:** Every Tuesday (NSE changed from Thursday — effective 2026)
+
+**Lot size:** 75 units per lot (NSE revised Jan 2026 — auto-fetched from Kite)
+
+**Strike intervals:** Every 50 points (e.g., 24300, 24350, 24400...)
+
+**Order type:** Limit at LTP ± 2 pts (not market — avoids wide spread slippage)
+
+**Product type:** MIS (intraday only — positions auto-squared off by Kite at 15:30 if not closed)
+
+**Minimum margin required:** Approximately ₹15,000–25,000 per lot for ATM options
+(actual premium varies with market conditions)
+
+**Tuesday expiry day rule:** System always skips same-day expiry and uses next week's contract.
+Same-day expiry options have extreme gamma risk — premium can halve in minutes.
+
+**SL/Target tracking:** Tracked in Nifty index points, not option premium.
+Actual options P&L may differ due to theta decay and IV changes.
         """)
 
     # ── Settings Guide ────────────────────────────────────────────────────
     with st.expander("⚙️ Settings — What Each One Does"):
         st.markdown("""
-**Current recommended settings (as of paper trading results):**
-
 | Setting | Value | Why |
 |---------|-------|-----|
 | Entry Timeframe | 5minute | Best signal volume and accuracy |
-| Min Booster Score | 9 | Filters weak setups, keeps quality |
-| Min Confluence | 1 | Set to 1 after zero-signal week — confluence=2 was too strict |
-| Zone Approach | 100 pts | Fires signal when LTP is within 100 pts of zone |
-| Signal Expiry | 45 min | Pending signals older than 45 min are auto-expired |
-| SL Buffer | 5 pts | Extra buffer beyond zone distal to avoid wick stop-outs |
-| Zone Classes | Demand only | Supply zones underperformed — demand-only currently |
-| Scan Window | 09:15–15:25 | Full day; consider 10:00–15:25 to skip opening noise |
+| Min Booster Score | 9 | Filters weak setups |
+| Min Confluence | 1 | Set to 1 — confluence=2 produced zero signals |
+| Zone Approach | 100 pts | Signal fires when LTP within 100 pts of zone |
+| Signal Expiry | 45 min | Pending signals older than 45 min auto-expired |
+| SL Buffer | 5 pts | Extra buffer beyond zone distal — avoids wick stop-outs |
+| Zone Classes | Demand only | Supply zones underperformed |
+| Scan Window | 09:15–15:25 | Consider 10:00–15:25 to skip opening volatility |
 
-**Why confluence was set to 1:**
-Engine produced zero signals for a week. Log showed *"Skipped — confluence 1 < min 2 required"*
-for every zone. Only 2 valid 60min zones existed and none overlapped with 15min zones.
-Reduced to 1 to allow single-TF signals.
+**Why confluence = 1:**
+Engine produced zero signals for a week with confluence=2.
+Only 2 valid 60min zones existed and none overlapped with 15min zones.
         """)
 
     # ── Time of Day Insights ──────────────────────────────────────────────
     with st.expander("🕐 Time of Day — What the Data Shows"):
         st.markdown("""
-**Analysis of 36 paper trades (as of Aug 2026):**
+**Analysis of paper trades (as of Aug 2026):**
 
-| Hour | Trades | Win% | Avg P&L | Note |
-|------|--------|------|---------|------|
-| 09:xx | 3 | 67% | 43.9 pts | Too few trades to conclude |
-| 10:xx | 12 | 75% | 39.5 pts | High volume, solid |
-| 11:xx | 9 | 78% | 48.2 pts | Strong |
-| 12:xx | 4 | 50% | 8.8 pts | ⚠️ Weakest — lunch hour chop |
-| 13:xx | 1 | 100% | 52.0 pts | Too few trades |
-| 14:xx | 6 | 83% | 63.5 pts | ⭐ Best hour |
-| 15:xx | 1 | 100% | 37.0 pts | Too few trades |
+| Hour | Win% | Avg P&L | Note |
+|------|------|---------|------|
+| 09:xx | 67% | 43.9 pts | Too few trades |
+| 10:xx | 75% | 39.5 pts | Solid |
+| 11:xx | 78% | 48.2 pts | Strong |
+| 12:xx | 50% | 8.8 pts | ⚠️ Weakest — lunch hour chop |
+| 14:xx | 83% | 63.5 pts | ⭐ Best hour |
 
-**Key insight:** Afternoon (14:xx) is the best performing hour — highest win rate AND highest average P&L.
-Midday (12:xx) is the weakest — classic lunch-hour market choppiness.
-
-**Action:** Consider setting Scan Window to skip 12:00–12:59 once you have more data to confirm.
-        """)
-
-    # ── Going Live ────────────────────────────────────────────────────────
-    with st.expander("🔴 Going Live — Checklist & Notes"):
-        st.markdown("""
-**Before switching to Live mode:**
-
-- [ ] 20+ paper trades logged with positive results
-- [ ] Win rate consistently above 50%
-- [ ] System running without crashes for 5+ trading days
-- [ ] Kite static IP registered (SEBI requirement from April 2026)
-- [ ] Sufficient margin in Kite account (check sidebar when in Live mode)
-- [ ] Kite redirect URL updated to `http://13.201.210.4:5000/`
-- [ ] Port 5000 open in AWS Lightsail firewall
-
-**How to switch:**
-Sidebar → "Switch to 🔴 LIVE" → type `LIVE` → Confirm → Restart engine on VPS
-
-**After switching to Live:**
-- Dashboard requires OTP login (sent to Telegram)
-- Sidebar shows Available Margin from Kite in real time
-- Approving a signal places a REAL order on Kite
-
-**SEBI Static IP rule (April 2026):**
-All API orders must come from a registered static IP.
-AWS Lightsail provides a permanent static IP (13.201.210.4).
-Register it at: Kite profile → API section.
+**Action:** Consider skipping 12:00–13:00 in Scan Window once more live data confirms.
         """)
 
     # ── Troubleshooting ───────────────────────────────────────────────────
     with st.expander("🔧 Troubleshooting"):
         st.markdown("""
 **No signals for days:**
-- Check logs: `sudo journalctl -u trading -n 100`
-- Most common cause: confluence filter too strict → set Min Confluence to 1
-- Also check Zone Approach — if too tight (< 50 pts), zones are skipped as too far
-- Verify engine is actually running (sidebar shows 🟢)
+- Check logs: `journalctl -u trading --since today | tail -50`
+- "demand zone but 60min trend is DOWN" → normal, market is bearish
+- "confluence < min" → reduce Min Confluence to 1
+- Verify engine running: sidebar shows 🟢
 
-**Token expired error:**
-- Kite token is valid for one calendar day only
-- Regenerate token every morning before market opens
-- If engine crashes mid-day, regenerate token and restart
+**Order failed / auto-rejected:**
+- Telegram shows failure reason
+- Signal is automatically rejected — approve the next signal
+- Check kite_order_id in Signals tab — empty = no order ever placed
+
+**Contract not found:**
+- Most common cause: expiry day calculation wrong
+- Check logs: `journalctl -u trading | grep "Expiry dates"`
+- Logs show actual expiry dates Kite returns — compare with code
+
+**Token error mid-day:**
+- Kite token valid only for today — regenerate if you see "invalid token"
+- Engine tab → Login to Kite → save token again → restart engine
+
+**Same zone appearing repeatedly:**
+- Normal after an order failure — zone re-signals when previous attempt was rejected
+- Reject all old signals, wait for fresh ones after zone is re-touched
 
 **Data loss warning:**
-- Never run `git reset --hard` on VPS without backing up `data/trades.db` first
-- Backup command: `cp ~/Trading_system/data/trades.db ~/trades_backup_$(date +%Y%m%d).db`
-- Or use the Telegram backup button in Engine tab → Backup section
+- Never `git reset --hard` on VPS without backup:
+  `cp ~/Trading_system/data/trades.db ~/trades_backup_$(date +%Y%m%d).db`
+- Or use Telegram backup button in Engine tab → section 6
 
-**Engine not stopping:**
-- Engine stop works via flag in settings.json (not kill signal)
-- If stuck: `sudo systemctl restart trading` will force restart
-
-**transfer.sh / file upload blocked:**
-- Indian ISPs block transfer.sh — use SCP with Lightsail .pem key instead
-- `scp -i ~/lightsail.pem ubuntu@13.201.210.4:~/Trading_system/data/trades.db .`
-
-**Auto-learn disabled everything:**
-- Go to 🤖 Learning tab → Re-enable section
-- Re-enable items one by one and monitor results carefully
+**Auto-learn disabled a setting:**
+- Learning tab → Re-enable section → re-enable one by one
         """)
 
     # ── VPS Quick Reference ───────────────────────────────────────────────
@@ -1572,30 +1599,31 @@ Register it at: Kite profile → API section.
         st.markdown("""
 **Server:** AWS Lightsail Mumbai | IP: 13.201.210.4 | User: ubuntu
 
-**Common commands:**
 ```bash
 # Check engine status
 sudo systemctl status trading
 
-# Restart engine
+# Restart engine (always after git pull)
 sudo systemctl restart trading
 
 # View live logs
-sudo journalctl -u trading -f
+journalctl -u trading -f
+
+# View today's logs
+journalctl -u trading --since today
+
+# Search logs for order activity
+journalctl -u trading | grep -i "order\\|approve\\|kite\\|error"
 
 # Backup trades DB
 cp ~/Trading_system/data/trades.db ~/trades_backup_$(date +%Y%m%d).db
 
 # Pull latest code and restart
 cd ~/Trading_system && git pull && sudo systemctl restart trading
-
-# Check public IP
-curl -s ifconfig.me
 ```
 
 **Ports open in Lightsail firewall:**
-- 8501 — Streamlit dashboard
-- 5000 — Kite token auto-capture (open this before going live)
+- 8501 — Streamlit dashboard (public)
         """)
 
-    st.info("💡 Add new learnings here as you trade — this tab is your permanent reference guide.")
+    st.info("💡 Update this tab whenever you discover something new — it's your permanent reference.")
