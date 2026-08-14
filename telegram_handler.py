@@ -75,6 +75,7 @@ def _handle_callback(cb: dict, token: str):
                 row = get_signal(sig_id)
                 # ── Live: place real options entry order ──────────────────
                 order_note = ""
+                _order_failed = False
                 if config.load_settings().get("MODE") == "live" and row:
                     try:
                         from brokers.kite_adapter import KiteAdapter
@@ -94,12 +95,13 @@ def _handle_callback(cb: dict, token: str):
                         _fail_note = f"Order failed: {_oe}"
                         reject_signal(sig_id, _fail_note)
                         logger.error("Live entry order failed for signal #%d: %s", sig_id, _oe)
-                        answer = f"❌ Signal #{sig_id} order FAILED — auto-rejected.\n{_oe}\nApprove the next signal."
-                        notify._send(answer)
-                        return
-                answer = f"✅ Signal #{sig_id} approved!{order_note}"
-                if row:
-                    notify.trade_approved(sig_id, row["entry"], row["stop_loss"], row["intraday_target"])
+                        answer = f"❌ Signal #{sig_id} order FAILED — auto-rejected. Approve next signal."
+                        notify._send(f"❌ Order FAILED for signal #{sig_id}:\n{_oe}\nSignal auto-rejected — approve the next one.")
+                        _order_failed = True
+                if not _order_failed:
+                    answer = f"✅ Signal #{sig_id} approved!{order_note}"
+                    if row:
+                        notify.trade_approved(sig_id, row["entry"], row["stop_loss"], row["intraday_target"])
 
         elif action.startswith("reject_"):
             sig_id = int(action.split("_", 1)[1])

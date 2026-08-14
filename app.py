@@ -535,7 +535,7 @@ with tab_engine:
     st.divider()
 
     # ── Settings ──────────────────────────────────────────────────────────
-    st.subheader("4. Settings")
+    st.subheader("5. Settings")
     st.caption("Changes take effect on the next engine start.")
 
     _current = config.load_settings()
@@ -643,7 +643,7 @@ with tab_engine:
     st.divider()
 
     # ── Backup ────────────────────────────────────────────────────────────
-    st.subheader("5. Backup")
+    st.subheader("6. Backup")
     col_db, col_csv = st.columns(2)
 
     with col_db:
