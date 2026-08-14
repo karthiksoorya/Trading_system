@@ -197,9 +197,9 @@ class KiteAdapter(BrokerBase):
         option_type = "CE" if direction == "demand" else "PE"
         strike = round(ltp / 50) * 50
 
-        # Next Thursday expiry (Nifty weekly expires every Thursday)
+        # Next Tuesday expiry (NSE changed Nifty weekly expiry from Thursday to Tuesday)
         today = date.today()
-        days_ahead = (3 - today.weekday()) % 7          # 3 = Thursday
+        days_ahead = (1 - today.weekday()) % 7          # 1 = Tuesday
         if days_ahead == 0 and dt.now().strftime("%H:%M") >= "15:30":
             days_ahead = 7                               # Today's expiry is past — use next
         expiry = today + timedelta(days=days_ahead)
