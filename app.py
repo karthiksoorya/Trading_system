@@ -845,6 +845,7 @@ def _approvals_tab():
                             if not _k._token_loaded:
                                 st.toast("⚠️ No Kite token — approval saved but NO real order placed. Go to Engine tab and save today's token first.", icon="⚠️")
                             else:
+                                _k.validate_entry(r["entry"], r["stop_loss"], r["zone_class"])
                                 _contract = _k.get_options_contract(r["entry"], r["zone_class"])
                                 _qty      = _contract["lot_size"]
                                 _oid      = _k.place_options_order(_contract["symbol"], "BUY", _qty)

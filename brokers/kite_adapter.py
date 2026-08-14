@@ -200,8 +200,8 @@ class KiteAdapter(BrokerBase):
         # Next Tuesday expiry (NSE changed Nifty weekly expiry from Thursday to Tuesday)
         today = date.today()
         days_ahead = (1 - today.weekday()) % 7          # 1 = Tuesday
-        if days_ahead == 0 and dt.now().strftime("%H:%M") >= "15:30":
-            days_ahead = 7                               # Today's expiry is past — use next
+        if days_ahead == 0:
+            days_ahead = 7   # Never trade same-day expiry — extreme gamma risk
         expiry = today + timedelta(days=days_ahead)
 
         instruments = self._get_instruments("NFO")
@@ -253,6 +253,20 @@ class KiteAdapter(BrokerBase):
             f"or {expiry + timedelta(days=7)}. Check logs for available expiries."
         )
 
+    def validate_entry(self, entry: float, stop_loss: float, zone_class: str) -> None:
+        """Raise ValueError if current Nifty price has moved too far from the entry zone."""
+        ltp = self.get_ltp(config.NIFTY_SYMBOL)
+        tolerance = min(abs(entry - stop_loss) * 0.5, 20)   # 50% of SL distance, max 20 pts
+        if zone_class == "demand" and ltp < entry - tolerance:
+            raise ValueError(
+                f"Nifty at {ltp:.2f} — fell {entry - ltp:.1f} pts below entry {entry:.2f}. Zone may be broken."
+            )
+        if zone_class == "supply" and ltp > entry + tolerance:
+            raise ValueError(
+                f"Nifty at {ltp:.2f} — rose {ltp - entry:.1f} pts above entry {entry:.2f}. Zone may be broken."
+            )
+        logger.info("Entry validation passed: LTP=%.2f entry=%.2f zone=%s", ltp, entry, zone_class)
+
     def get_lot_size(self) -> int:
         """Return current Nifty lot size from Kite instruments (auto-updates when NSE revises)."""
         try:
@@ -264,19 +278,37 @@ class KiteAdapter(BrokerBase):
         return config.NIFTY_LOT_SIZE   # fallback to hardcoded value
 
     def place_options_order(self, symbol: str, action: str, quantity: int) -> str:
-        """Place MIS market order. action='BUY' or 'SELL'. Returns Kite order_id."""
+        """Place MIS limit order at current option LTP ± buffer. Falls back to market if LTP unavailable."""
         tx = (self._kite.TRANSACTION_TYPE_BUY
               if action == "BUY" else self._kite.TRANSACTION_TYPE_SELL)
-        order_id = self._kite.place_order(
+
+        order_type = self._kite.ORDER_TYPE_MARKET
+        price = None
+        try:
+            opt_ltp = self._kite.ltp([f"NFO:{symbol}"])[f"NFO:{symbol}"]["last_price"]
+            if opt_ltp > 0:
+                # BUY: 2 pts above LTP to ensure fill; SELL: 2 pts below
+                raw = (opt_ltp + 2) if action == "BUY" else max(opt_ltp - 2, 0.05)
+                price = round(round(raw / 0.05) * 0.05, 2)  # round to tick size 0.05
+                order_type = self._kite.ORDER_TYPE_LIMIT
+        except Exception as e:
+            logger.warning("Could not fetch option LTP for %s — using market order: %s", symbol, e)
+
+        kwargs = dict(
             variety=self._kite.VARIETY_REGULAR,
             exchange=self._kite.EXCHANGE_NFO,
             tradingsymbol=symbol,
             transaction_type=tx,
             quantity=quantity,
             product=self._kite.PRODUCT_MIS,
-            order_type=self._kite.ORDER_TYPE_MARKET,
+            order_type=order_type,
         )
-        logger.info("Placed %s order for %s qty=%d → order_id=%s", action, symbol, quantity, order_id)
+        if price is not None:
+            kwargs["price"] = price
+
+        order_id = self._kite.place_order(**kwargs)
+        logger.info("Placed %s %s order for %s qty=%d price=%s → order_id=%s",
+                    action, order_type, symbol, quantity, price, order_id)
         return str(order_id)
 
     def get_funds(self) -> dict:
