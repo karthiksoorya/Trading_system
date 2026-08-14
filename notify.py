@@ -36,15 +36,24 @@ def _send(text: str, reply_markup: dict | None = None) -> int | None:
 def signal_detected(signal_id: int, zone_class: str, zone_type: str,
                     timeframe: str, entry: float, sl: float,
                     target: float, score: float, confluence: str):
-    from datetime import datetime
+    from datetime import datetime, date, timedelta
     emoji     = "🟢" if zone_class == "demand" else "🔴"
     direction = "LONG" if zone_class == "demand" else "SHORT"
     now       = datetime.now().strftime("%H:%M:%S")
+
+    # Expiry day warning (Tuesday = weekly expiry day)
+    today = date.today()
+    expiry_note = ""
+    if today.weekday() == 1:   # Tuesday
+        next_expiry = today + timedelta(days=7)
+        expiry_note = f"\n⚠️ <b>Expiry day</b> — order will use next week ({next_expiry.strftime('%d %b')}) contract"
+
     text = (
         f"{emoji} <b>Signal #{signal_id} — {direction}</b>  🕐 {now}\n"
         f"{zone_type} | {timeframe}\n"
         f"Entry: {entry:.2f} | SL: {sl:.2f} | TGT: {target:.2f}\n"
         f"Score: {score:.1f}/10 | {confluence}"
+        f"{expiry_note}"
     )
     keyboard = {
         "inline_keyboard": [[

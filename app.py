@@ -694,6 +694,17 @@ with tab_engine:
 
 @st.fragment(run_every=30)
 def _approvals_tab():
+    # ── Expiry day banner ─────────────────────────────────────────────────
+    from datetime import date as _date, timedelta as _td
+    _today = _date.today()
+    if _today.weekday() == 1:   # Tuesday = expiry day
+        _next_exp = _today + _td(days=7)
+        st.warning(
+            f"⚠️ **Today is Nifty expiry day (Tuesday).** "
+            f"Orders will use next week's contract ({_next_exp.strftime('%d %b %Y')}) — not today's expiry.",
+            icon="⚠️",
+        )
+
     # ── Open Trades — Live P&L ────────────────────────────────────────────
     open_trades = get_open_trades()
     if open_trades:
