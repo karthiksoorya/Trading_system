@@ -617,6 +617,27 @@ with tab_engine:
     )
     st.caption("Set 09:15 → 15:25 to scan all day. Example: set 10:00 → 14:59 to skip 12:xx chop.")
 
+    st.divider()
+    st.subheader("Auto-Trade First Signal")
+    auto_first = st.toggle(
+        "🤖 Auto-execute first trade of the day",
+        value=_current.get("AUTO_FIRST_TRADE", False),
+        help=(
+            "When ON: the first qualifying signal each day is approved and ordered automatically — "
+            "no Telegram button press needed. If target or SL hits, the system exits automatically. "
+            "All subsequent signals still require your manual approval."
+        ),
+    )
+    if auto_first:
+        st.info(
+            "🤖 **Auto-trade ON** — first signal today will be placed automatically on Kite. "
+            "You will receive a Telegram notification when it executes. "
+            "Remaining signals still need your approval.",
+            icon="🤖",
+        )
+    else:
+        st.caption("Auto-trade OFF — every signal requires your approval via Telegram.")
+
     if st.button("💾 Save Settings"):
         if not scan_tfs:
             st.error("Select at least one timeframe.")
@@ -633,6 +654,7 @@ with tab_engine:
                 "MIN_BOOSTER_SCORE":     min_score,
                 "MIN_CONFLUENCE":        min_conf,
                 "SCAN_WINDOW":           {"start": scan_start_time, "end": scan_end_time},
+                "AUTO_FIRST_TRADE":      auto_first,
             })
             st.success(
                 f"Saved — TF: {entry_tf} | Score ≥ {min_score} | "

@@ -64,6 +64,27 @@ def signal_detected(signal_id: int, zone_class: str, zone_type: str,
     _send(text, reply_markup=keyboard)
 
 
+def signal_auto_approved(signal_id: int, zone_class: str, entry: float, sl: float,
+                         target: float, symbol: str, order_id: str):
+    """Telegram notification when first trade is auto-executed by the system."""
+    emoji = "🟢" if zone_class == "demand" else "🔴"
+    direction = "LONG" if zone_class == "demand" else "SHORT"
+    keyboard = {
+        "inline_keyboard": [[
+            {"text": "🚨 Early Exit (system closes on Kite)", "callback_data": f"close_{signal_id}"},
+        ]]
+    }
+    _send(
+        f"🤖 <b>Auto-Trade #{signal_id} — First Trade of Day</b>\n"
+        f"{emoji} {direction} | {symbol}\n"
+        f"Entry: {entry:.2f} | SL: {sl:.2f} | Target: {target:.2f}\n"
+        f"Order #{order_id} placed on Kite automatically.\n"
+        f"⚙️ System monitors for auto-exit on target / SL / EOD.\n"
+        f"⚠️ <b>Do NOT close manually on Kite</b> — use button below only for early exit.",
+        reply_markup=keyboard,
+    )
+
+
 def trade_approved(signal_id: int, entry: float, sl: float, target: float):
     keyboard = {
         "inline_keyboard": [[

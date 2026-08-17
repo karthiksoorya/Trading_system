@@ -24,7 +24,9 @@ from engine.confluence import check_confluence
 from engine.zones import detect_zones, update_zone_state
 from engine.signals import generate_signal
 from engine.position_size import calculate as size_trade
-from journal.db import init_db, log_signal, trades_today, daily_pnl, get_open_trades, close_trade, zone_signaled_today, expire_old_pending
+from journal.db import (init_db, log_signal, trades_today, daily_pnl, get_open_trades,
+                        close_trade, zone_signaled_today, expire_old_pending,
+                        approve_signal, update_signal_order, update_signal_entry_price, reject_signal)
 from journal.export import export_day
 import notify
 
@@ -245,17 +247,74 @@ def _scan_core():
                 signal.confluence.label(),
                 signal.entry, signal.stop_loss, signal.intraday_target,
             )
-            notify.signal_detected(
-                signal_id=sig_id,
-                zone_class=signal.zone.zone_class,
-                zone_type=signal.zone.zone_type,
-                timeframe=tf,
-                entry=signal.entry,
-                sl=signal.stop_loss,
-                target=signal.intraday_target,
-                score=signal.boosters.total,
-                confluence=signal.confluence.label(),
-            )
+
+            _settings      = config.load_settings()
+            _auto_first    = _settings.get("AUTO_FIRST_TRADE", False)
+            _no_open_trade = not get_open_trades()
+
+            if _auto_first and trades_today() == 0 and _no_open_trade:
+                # ── Auto-execute the first trade of the day ───────────────
+                logger.info("AUTO-TRADE: first trade of day — auto-approving signal #%d", sig_id)
+                approve_signal(sig_id)
+                _auto_ok = False
+                if _settings.get("MODE") == "live":
+                    try:
+                        from brokers.kite_adapter import KiteAdapter as _KA
+                        _k = _KA()
+                        if not _k._token_loaded:
+                            logger.warning("AUTO-TRADE skipped — no Kite token. Sending for manual approval.")
+                            notify.signal_detected(
+                                signal_id=sig_id, zone_class=signal.zone.zone_class,
+                                zone_type=signal.zone.zone_type, timeframe=tf,
+                                entry=signal.entry, sl=signal.stop_loss,
+                                target=signal.intraday_target, score=signal.boosters.total,
+                                confluence=signal.confluence.label(),
+                            )
+                        else:
+                            _k.validate_entry(signal.entry, signal.stop_loss, signal.zone.zone_class)
+                            _contract = _k.get_options_contract(signal.entry, signal.zone.zone_class)
+                            _qty      = _contract["lot_size"]
+                            _oid      = _k.place_options_order(_contract["symbol"], "BUY", _qty)
+                            update_signal_order(sig_id, _oid, _contract["symbol"], _qty)
+                            logger.info("AUTO-TRADE placed: %s order #%s", _contract["symbol"], _oid)
+                            time.sleep(3)
+                            _fill = _k.get_order_fill_price(_oid)
+                            if _fill > 0:
+                                update_signal_entry_price(sig_id, _fill)
+                            notify.signal_auto_approved(
+                                sig_id, signal.zone.zone_class,
+                                signal.entry, signal.stop_loss, signal.intraday_target,
+                                _contract["symbol"], _oid,
+                            )
+                            _auto_ok = True
+                    except Exception as _ae:
+                        logger.error("AUTO-TRADE FAILED for signal #%d: %s", sig_id, _ae)
+                        reject_signal(sig_id, f"Auto-trade failed: {_ae}")
+                        notify._send(
+                            f"❌ Auto-trade FAILED for signal #{sig_id}:\n{_ae}\n"
+                            f"Signal auto-rejected — next signal needs manual approval."
+                        )
+                else:
+                    # Paper mode: auto-approve silently (no real order)
+                    notify._send(
+                        f"🤖 <b>Auto-Trade #{sig_id} (Paper)</b>\n"
+                        f"Entry: {signal.entry:.2f} | SL: {signal.stop_loss:.2f} | "
+                        f"Target: {signal.intraday_target:.2f}\nMonitoring..."
+                    )
+                    _auto_ok = True
+            else:
+                # ── Normal flow: send Telegram notification for manual approval ──
+                notify.signal_detected(
+                    signal_id=sig_id,
+                    zone_class=signal.zone.zone_class,
+                    zone_type=signal.zone.zone_type,
+                    timeframe=tf,
+                    entry=signal.entry,
+                    sl=signal.stop_loss,
+                    target=signal.intraday_target,
+                    score=signal.boosters.total,
+                    confluence=signal.confluence.label(),
+                )
 
 
 def _live_exit(trade: dict, reason: str):
