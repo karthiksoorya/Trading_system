@@ -742,9 +742,9 @@ def _approvals_tab():
                 # ── Manual close ──────────────────────────────────────────
                 _confirm_key = f"_confirm_close_{t['id']}"
                 if st.session_state.get(_confirm_key):
-                    st.warning("⚠️ Confirm manual close — this will exit the trade at current LTP.")
+                    st.warning("⚠️ Confirm manual close — this will place a SELL order on Kite and close the trade.")
                     if config.load_settings().get("MODE") == "live":
-                        st.error("🔴 LIVE MODE — also close your position manually on Kite app.")
+                        st.info("🔴 LIVE MODE — system will place the SELL order on Kite automatically.")
                     _ca, _cb, _cc = st.columns([1, 1, 2])
                     if _ca.button("✅ Yes, close now", type="primary",
                                   use_container_width=True, key=f"close_yes_{t['id']}"):
@@ -756,9 +756,14 @@ def _approvals_tab():
                             if _opts_sym:
                                 try:
                                     from brokers.kite_adapter import KiteAdapter as _KA2
+                                    from journal.db import update_signal_exit_order as _useo
                                     _ka2 = _KA2()
-                                    _ka2.place_options_order(_opts_sym, "SELL", _ka2.get_lot_size())
-                                    st.toast(f"LIVE EXIT: SELL {_opts_sym}", icon="🔴")
+                                    _sell_oid = _ka2.place_options_order(_opts_sym, "SELL", _ka2.get_lot_size())
+                                    st.toast(f"LIVE EXIT: SELL {_opts_sym} → order #{_sell_oid}", icon="🔴")
+                                    import time as _t2; _t2.sleep(3)
+                                    _sell_fill = _ka2.get_order_fill_price(_sell_oid)
+                                    if _sell_fill > 0:
+                                        _useo(t["id"], _sell_oid, _sell_fill)
                                 except Exception as _e2:
                                     st.error(f"⚠️ Exit order failed: {_e2}\nClose manually on Kite!")
                             else:
@@ -860,11 +865,18 @@ def _approvals_tab():
                                 _contract = _k.get_options_contract(r["entry"], r["zone_class"])
                                 _qty      = _contract["lot_size"]
                                 _oid      = _k.place_options_order(_contract["symbol"], "BUY", _qty)
-                                update_signal_order(r["id"], _oid, _contract["symbol"])
+                                update_signal_order(r["id"], _oid, _contract["symbol"], _qty)
                                 st.toast(
                                     f"🔴 LIVE ORDER PLACED: BUY {_contract['symbol']} × {_qty} lots | "
                                     f"Order #{_oid}", icon="🔴"
                                 )
+                                # Fetch actual fill price (wait for order to complete)
+                                import time as _t; _t.sleep(3)
+                                _fill = _k.get_order_fill_price(_oid)
+                                if _fill > 0:
+                                    from journal.db import update_signal_entry_price as _uep
+                                    _uep(r["id"], _fill)
+                                    st.toast(f"Entry premium recorded: ₹{_fill:.2f}", icon="📋")
                         except Exception as _e:
                             from journal.db import reject_signal
                             reject_signal(r["id"], f"Order failed: {_e}")
@@ -908,12 +920,20 @@ with tab_signals:
         elif _sig_mode_filter == "Live":
             df = df[df["mode"] == "live"]
 
+        # Compute actual options ₹ P&L where both entry and exit premium are known
+        if "options_entry_price" in df.columns and "options_exit_price" in df.columns:
+            lot = df.get("options_lot_size", 65).fillna(65).astype(int)
+            entry_p = pd.to_numeric(df["options_entry_price"], errors="coerce")
+            exit_p  = pd.to_numeric(df["options_exit_price"],  errors="coerce")
+            df["options_pnl_rs"] = ((exit_p - entry_p) * lot).round(2)
+
         display_cols = [
             "id", "mode", "status", "date", "time_signal", "zone_type", "zone_class", "timeframe",
             "entry", "stop_loss", "intraday_target",
             "booster_score", "confluence_count", "confluence_tfs",
             "entry_type", "position_size",
             "exit_price", "exit_reason", "pnl_points", "result",
+            "options_entry_price", "options_exit_price", "options_pnl_rs",
             "kite_order_id", "options_symbol",
         ]
         display_cols = [c for c in display_cols if c in df.columns]

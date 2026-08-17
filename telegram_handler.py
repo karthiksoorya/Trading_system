@@ -87,9 +87,21 @@ def _handle_callback(cb: dict, token: str):
                             _contract = _k.get_options_contract(row["entry"], row["zone_class"])
                             _qty      = _contract["lot_size"]
                             _oid      = _k.place_options_order(_contract["symbol"], "BUY", _qty)
-                            update_signal_order(sig_id, _oid, _contract["symbol"])
+                            update_signal_order(sig_id, _oid, _contract["symbol"], _qty)
                             order_note = f"\n🔴 LIVE ORDER: BUY {_contract['symbol']} ×{_qty} | Order #{_oid}"
                             logger.info("Live entry order placed: %s order #%s", _contract["symbol"], _oid)
+                            # Fetch fill price in background — don't block Telegram callback
+                            import threading as _thr
+                            def _fetch_entry_fill(_ka=_k, _oid=_oid, _sid=sig_id):
+                                import time as _t; _t.sleep(3)
+                                try:
+                                    _fill = _ka.get_order_fill_price(_oid)
+                                    if _fill > 0:
+                                        from journal.db import update_signal_entry_price
+                                        update_signal_entry_price(_sid, _fill)
+                                except Exception as _fe:
+                                    logger.debug("Entry fill fetch failed: %s", _fe)
+                            _thr.Thread(target=_fetch_entry_fill, daemon=True).start()
                     except Exception as _oe:
                         from journal.db import reject_signal
                         _fail_note = f"Order failed: {_oe}"
@@ -132,8 +144,19 @@ def _handle_callback(cb: dict, token: str):
                         try:
                             from brokers.kite_adapter import KiteAdapter
                             _ka = KiteAdapter()
-                            _ka.place_options_order(opts_sym, "SELL", _ka.get_lot_size())
-                            logger.info("Live exit order placed: SELL %s", opts_sym)
+                            _sell_oid = _ka.place_options_order(opts_sym, "SELL", _ka.get_lot_size())
+                            logger.info("Live exit order placed: SELL %s → #%s", opts_sym, _sell_oid)
+                            import threading as _thr
+                            def _fetch_exit_fill(_ka=_ka, _oid=_sell_oid, _tid=trade_id):
+                                import time as _t; _t.sleep(3)
+                                try:
+                                    _fill = _ka.get_order_fill_price(_oid)
+                                    if _fill > 0:
+                                        from journal.db import update_signal_exit_order
+                                        update_signal_exit_order(_tid, _oid, _fill)
+                                except Exception as _fe:
+                                    logger.debug("Exit fill fetch failed: %s", _fe)
+                            _thr.Thread(target=_fetch_exit_fill, daemon=True).start()
                         except Exception as ex:
                             notify._send(f"⚠️ Exit order FAILED for {opts_sym}: {ex}\nClose manually on Kite!")
                             logger.error("Live exit order failed: %s", ex)

@@ -91,12 +91,16 @@ def _migrate(con):
     """Add new columns to existing DB without breaking old data."""
     existing = {row[1] for row in con.execute("PRAGMA table_info(signals)")}
     migrations = [
-        ("confluence_count", "INTEGER DEFAULT 1"),
-        ("confluence_tfs",   "TEXT"),
-        ("status",           "TEXT NOT NULL DEFAULT 'pending'"),
-        ("kite_order_id",    "TEXT"),
-        ("options_symbol",   "TEXT"),
-        ("mode",             "TEXT DEFAULT 'paper'"),
+        ("confluence_count",    "INTEGER DEFAULT 1"),
+        ("confluence_tfs",      "TEXT"),
+        ("status",              "TEXT NOT NULL DEFAULT 'pending'"),
+        ("kite_order_id",       "TEXT"),
+        ("options_symbol",      "TEXT"),
+        ("mode",                "TEXT DEFAULT 'paper'"),
+        ("options_entry_price", "REAL"),
+        ("options_exit_price",  "REAL"),
+        ("options_exit_order_id", "TEXT"),
+        ("options_lot_size",    "INTEGER"),
     ]
     for col, definition in migrations:
         if col not in existing:
@@ -212,12 +216,30 @@ def _upsert_daily_summary(trade_date: str, pnl_points: float, result: str):
 
 # ── Read ──────────────────────────────────────────────────────────────────
 
-def update_signal_order(signal_id: int, kite_order_id: str, options_symbol: str) -> None:
-    """Store the live Kite order details after entry order is placed."""
+def update_signal_order(signal_id: int, kite_order_id: str, options_symbol: str, lot_size: int = 0) -> None:
+    """Store the live Kite BUY order details after entry order is placed."""
     with _conn() as con:
         con.execute(
-            "UPDATE signals SET kite_order_id=?, options_symbol=? WHERE id=?",
-            (kite_order_id, options_symbol, signal_id),
+            "UPDATE signals SET kite_order_id=?, options_symbol=?, options_lot_size=? WHERE id=?",
+            (kite_order_id, options_symbol, lot_size or 0, signal_id),
+        )
+
+
+def update_signal_entry_price(signal_id: int, options_entry_price: float) -> None:
+    """Store actual options premium paid after BUY order fills."""
+    with _conn() as con:
+        con.execute(
+            "UPDATE signals SET options_entry_price=? WHERE id=?",
+            (options_entry_price, signal_id),
+        )
+
+
+def update_signal_exit_order(signal_id: int, exit_order_id: str, exit_price: float) -> None:
+    """Store actual options premium received after SELL order fills."""
+    with _conn() as con:
+        con.execute(
+            "UPDATE signals SET options_exit_order_id=?, options_exit_price=? WHERE id=?",
+            (exit_order_id, exit_price, signal_id),
         )
 
 

@@ -67,13 +67,14 @@ def signal_detected(signal_id: int, zone_class: str, zone_type: str,
 def trade_approved(signal_id: int, entry: float, sl: float, target: float):
     keyboard = {
         "inline_keyboard": [[
-            {"text": "🚨 Close Trade Now", "callback_data": f"close_{signal_id}"},
+            {"text": "🚨 Early Exit (system closes on Kite)", "callback_data": f"close_{signal_id}"},
         ]]
     }
     _send(
-        f"✅ <b>Trade #{signal_id} Approved</b>\n"
+        f"✅ <b>Trade #{signal_id} Approved — order placed on Kite</b>\n"
         f"Entry: {entry:.2f} | SL: {sl:.2f} | Target: {target:.2f}\n"
-        f"Monitoring for auto-exit...",
+        f"⚙️ System will auto-exit on target / SL / EOD.\n"
+        f"⚠️ <b>Do NOT close manually on Kite</b> — use button below only if you want an early exit.",
         reply_markup=keyboard,
     )
 

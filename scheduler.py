@@ -259,7 +259,7 @@ def _scan_core():
 
 
 def _live_exit(trade: dict, reason: str):
-    """Place Kite SELL order for live trades. Logs error but never blocks close."""
+    """Place Kite SELL order for live trades and record fill price. Never blocks close."""
     if config.load_settings().get("MODE") != "live":
         return
     opts_sym = trade.get("options_symbol")
@@ -269,9 +269,16 @@ def _live_exit(trade: dict, reason: str):
         return
     try:
         from brokers.kite_adapter import KiteAdapter
+        from journal.db import update_signal_exit_order
         _ka = KiteAdapter()
-        _ka.place_options_order(opts_sym, "SELL", _ka.get_lot_size())
-        logger.info("Live exit order placed: SELL %s (%s)", opts_sym, reason)
+        _sell_oid = _ka.place_options_order(opts_sym, "SELL", _ka.get_lot_size())
+        logger.info("Live exit order placed: SELL %s (%s) → order #%s", opts_sym, reason, _sell_oid)
+        # Wait for fill then record actual exit premium
+        time.sleep(3)
+        _fill = _ka.get_order_fill_price(_sell_oid)
+        if _fill > 0:
+            update_signal_exit_order(trade["id"], _sell_oid, _fill)
+            logger.info("Options exit price recorded: %.2f for trade #%d", _fill, trade["id"])
     except Exception as ex:
         logger.error("Live exit order FAILED for %s: %s", opts_sym, ex)
         notify._send(f"⚠️ Exit order FAILED for {opts_sym} ({reason}): {ex}\nClose manually on Kite!")

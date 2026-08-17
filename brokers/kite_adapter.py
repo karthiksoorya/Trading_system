@@ -311,6 +311,24 @@ class KiteAdapter(BrokerBase):
                     action, order_type, symbol, quantity, price, order_id)
         return str(order_id)
 
+    def get_order_fill_price(self, order_id: str, retries: int = 3, wait: float = 2.0) -> float:
+        """Return average fill price for a completed order. Returns 0.0 if not yet filled."""
+        for attempt in range(retries):
+            try:
+                history = self._kite.order_history(order_id)
+                for h in reversed(history):
+                    if h.get("status") == "COMPLETE":
+                        price = float(h.get("average_price", 0))
+                        if price > 0:
+                            logger.info("Order %s fill price: %.2f", order_id, price)
+                            return price
+            except Exception as e:
+                logger.warning("get_order_fill_price(%s) attempt %d: %s", order_id, attempt + 1, e)
+            if attempt < retries - 1:
+                time.sleep(wait)
+        logger.warning("Fill price unavailable for order %s after %d attempts", order_id, retries)
+        return 0.0
+
     def get_funds(self) -> dict:
         """Return available equity margin from Kite. Keys: cash, live_balance, used."""
         try:
