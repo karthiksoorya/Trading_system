@@ -1636,6 +1636,57 @@ Only 2 valid 60min zones existed and none overlapped with 15min zones.
 - Learning tab → Re-enable section → re-enable one by one
         """)
 
+    # ── Stable Versions ───────────────────────────────────────────────────
+    with st.expander("🏷️ Stable Versions — How to Tag and Restore"):
+        st.markdown("""
+**Tag a stable version after a successful trading day:**
+
+```bash
+# Find the commit hash (look for the date you want)
+git log --format="%h %ad %s" --date=short
+
+# Create a tag on that commit
+git tag -a v1.0-stable <commit-hash> -m "Description of what's working"
+
+# Push tag to GitHub
+git push origin v1.0-stable
+```
+
+You can also create tags from **GitHub UI:**
+Repo → Releases → Draft a new release → Choose a tag → pick the commit.
+
+---
+
+**Check existing tags:**
+```bash
+git tag -l                  # list all tags
+git show v1.0-stable --stat # see what's in a tag
+```
+
+---
+
+**Restore to a stable version on VPS (when something breaks):**
+```bash
+git fetch --tags
+git checkout v1.0-stable
+sudo systemctl restart trading.service
+```
+
+**Return to latest after restoring:**
+```bash
+git checkout main && git pull
+sudo systemctl restart trading.service
+```
+
+---
+
+**Current stable tags:**
+
+| Tag | Date | Description |
+|-----|------|-------------|
+| v1.0-stable | Aug 14, 2026 (commit a09340b) | First successful live trading day — Aug 17, 3/3 target hits |
+        """)
+
     # ── VPS Quick Reference ───────────────────────────────────────────────
     with st.expander("🖥️ VPS Quick Reference"):
         st.markdown("""
