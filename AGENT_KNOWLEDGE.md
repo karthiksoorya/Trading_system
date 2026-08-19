@@ -230,6 +230,7 @@ cp ~/Trading_system/data/trades.db ~/trades_backup_$(date +%Y%m%d).db  # backup
 
 **Git tags:**
 - `v1.0-stable` (commit a09340b, Aug 14 2026) — first successful live trading day
+- `v3.0-pre-training` (commit b0fa72e, Aug 19 2026) — agent knowledge base added, before supply/demand training integration
 
 ---
 
@@ -357,7 +358,157 @@ sudo systemctl restart trading.service
 
 ---
 
-## 12. OPEN QUESTIONS FOR FUTURE
+## 12. THEORETICAL FOUNDATION (Training Materials — Kavi Course)
+
+Source: 5 PPTs + Learnings.docx (Aug 2026). This is the supply/demand methodology the system is built on.
+
+### 12.1 Why Price Moves
+Price moves because of imbalance between supply and demand:
+- Price moves HIGHER where willing demand exceeds willing supply
+- Price moves LOWER where willing supply exceeds willing demand
+- These imbalances leave footprints on the chart — zones where big participants accumulated/distributed
+
+**Two novice mistakes to avoid:**
+- Buying AFTER a rally (chasing) — buying at supply
+- Selling AFTER a decline (panic) — selling at demand
+
+### 12.2 Candle Classification
+| Type | Body/Range ratio | Meaning |
+|------|-----------------|---------|
+| Boring | Body < 50% of total range | Supply/demand in balance — base formation |
+| Exciting | Body > 50% of total range | Imbalance — leg-in or leg-out of zone |
+
+**Zone structure always:** Exciting → Boring(s) → Exciting  
+(Leg-in → Base → Leg-out)
+
+### 12.3 Zone Line Placement Rules (exact from training)
+
+**Demand Zones:**
+| Zone | Proximal Line | Distal Line |
+|------|--------------|-------------|
+| DBR | Highest Body in base | Lowest Low in entire DBR |
+| RBR | Highest Body in base | Lowest Low in RBR (excluding leg-in) |
+
+**Supply Zones:**
+| Zone | Proximal Line | Distal Line |
+|------|--------------|-------------|
+| RBD | Lowest Body in base | Highest High in entire RBD |
+| DBD | Lowest Body in base | Highest High in DBD (excluding leg-in) |
+
+**Variations allowed:**
+- Proximal can be: lowest low / lowest body / highest body / highest high (whichever is most conservative)
+- Distal is always the absolute extreme (lowest low for demand, highest high for supply)
+
+### 12.4 Multi-Timeframe Framework (S.E.T)
+| Timeframe role | Abbreviation | Purpose |
+|---------------|-------------|---------|
+| Higher TF | HTF | Curve — where is price in the big picture? |
+| Intermediate TF | ITF | Trend — which direction is the market trending? |
+| Lower TF | LTF | S.E.T — actual entry/exit zone identification |
+
+**Timeframe combinations for our trading (Hourly):**
+- HTF = 1 Hour (curve analysis)
+- ITF = 15 Min (trend direction)
+- LTF = 3–5 Min (entry zone)
+
+### 12.5 The Actions Table (when to trade)
+This is the master decision matrix — combine zone type + trend + curve position:
+
+| Curve position | DOWN trend (Supply) | SIDEWAYS (Supply) | UP trend (Supply) | DOWN trend (Demand) | SIDEWAYS (Demand) | UP trend (Demand) |
+|---------------|--------------------|--------------------|------------------|--------------------|---------------------|------------------|
+| Very High | SHORT | SHORT | SHORT | No Action | No Action | No Action |
+| High | SHORT | SHORT | No Action | No Action | No Action | No Action |
+| Middle | SHORT | No Action | No Action | No Action | No Action | No Action |
+| Low | No Action | No Action | No Action | No Action | Long | Long |
+| Very Low | No Action | No Action | No Action | Long | Long | Long |
+
+**Key insight: Only trade at extremes of the curve.** Do NOT buy demand when price is already "high in curve" — wait for it to fall to the demand area. The 60min trend filter we implemented captures the trend column. Curve analysis (HTF position) is NOT yet implemented.
+
+### 12.6 Entry Types (3 types, we use Type 1)
+| Type | Name | How | Advantage | Disadvantage |
+|------|------|-----|-----------|-------------|
+| 1 | Limit Entry | Place order AT proximal line | High probability of fill, set-and-forget | Higher risk, lower reward than zone entry |
+| 2 | Zone Entry | Enter inside the zone (manually watch) | Lowest risk, highest reward | Cannot be automated, lower fill probability |
+| 3 | Confirmation Entry | Wait for reversal candle at zone | Less likely to stop out | Cannot be automated, lowest fill probability |
+
+**Score → Entry type:**
+- Score 0–7: Do NOT trade
+- Score 8–9: Type 2 or Type 3 only
+- Score 10: Type 1 (limit entry, automated) ✅
+
+**Current system uses Type 1 always. Training says score 10 required for Type 1.**
+
+### 12.7 Exit Rules (from training)
+- **Intraday R:R:** Minimum 1:2
+- **Overnight R:R:** Minimum 1:3
+- **Breakeven:** Move SL to entry price once trade reaches 1:1 R:R
+- **Trailing SL:** Follow price with a protective stop — manual or points-based
+- **Target placement:** Always place target BEFORE next opposing supply/demand level
+- **First Trouble Area (FTA):** Any opposing level between entry and target. If FTA is too close to entry, skip the trade or wait for FTA to break first.
+
+### 12.8 High Probable Areas (HPA) — NOT YET IMPLEMENTED
+These are levels where traders are expected to act en masse. More people noticing a level = more order flow = more reliable reaction.
+
+**HPA levels to mark every day:**
+1. Previous Day High (PDH)
+2. Previous Day Low (PDL)
+3. Current Day High (CDH) — marks at 10:00 AM after initial range forms
+4. Current Day Low (CDL)
+5. Big Round Numbers (BRN) — 24000, 24100, 24200 etc for Nifty
+6. Price Flip Zones — old support becomes resistance and vice versa
+
+**From Learnings.docx:**
+- Wait till 10:00 AM to mark Current Day High/Low
+- Opening Low → Bullish bias for the day
+- Opening High → Bearish bias for the day
+
+**Entry patterns at HPA:**
+- **TST/FTC** (Test / Failure to Continue): Price stalls BEFORE HPA, never breaks it → trade away from HPA
+- **BPB** (Breakout Pullback): Price breaks HPA, pulls back, holds → trade with trend
+- **BOF** (Breakout Failure): Price breaks HPA but fails → trade against the breakout
+
+### 12.9 Position Sizing — S.E.T.S (already implemented)
+**Formula:**
+1. Max Risk Per Day = Account × 1% (e.g., ₹1,00,000 × 1% = ₹1,000)
+2. Risk Per Trade = Max Risk Per Day ÷ Trades Per Day (e.g., ₹1,000 ÷ 4 = ₹250)
+3. Risk On Trade = Entry − Stop Loss (in points)
+4. Position Size = Risk Per Trade ÷ Risk On Trade
+
+**Example:** Risk/Trade = ₹250, SL distance = 2pts → Size = 125 shares
+
+### 12.10 Space / First Trouble Area
+Before entering any trade, identify the first obstacle between entry and target:
+- Recent swing high/low
+- Round number
+- Price flip zone
+- Consolidation border
+
+**Rule:** If FTA is within 1:1 R:R of entry, do NOT enter. Or wait for FTA to break, then enter on the pullback.
+
+### 12.11 Watch List Criteria (for stocks — not Nifty index)
+| Criteria | Value |
+|---------- |-------|
+| Price | ₹300 to ₹3,000 |
+| Average daily volume | ≥ 5 lakh shares/day |
+| Spread | Very small (tight bid-ask) |
+
+### 12.12 What Is NOT Yet Implemented (future roadmap)
+| Feature | Theory source | Priority |
+|---------|--------------|---------|
+| Curve analysis (HTF position) | Actions Table | High — prevents buying at "high in curve" |
+| HPA levels (PDH/PDL, CDH/CDL, BRN) | Index Trading PPT | High — filters poor-quality zone approaches |
+| First Trouble Area check | Index Trading PPT | High — avoids entries with obstacles |
+| Breakeven SL (move to entry at 1:1) | Trade Management PPT | Medium |
+| Trailing SL | Trade Management PPT | Medium |
+| Opening bias (Open Low=Bullish) | Learnings.docx | Medium |
+| Score ≥ 10 for Type 1 entry | Boosters PPT | Review — current threshold may be too low |
+| Entry Patterns (TST, BPB, BOF) | Index Trading PPT | Low — complex to automate |
+| Bank Nifty instrument | Index Trading PPT | Low |
+| VWAP awareness | Learnings.docx | Low |
+
+---
+
+## 13. OPEN QUESTIONS FOR FUTURE
 
 - Should SL/target track options premium price instead of Nifty index price?
 - Add Bank Nifty as second instrument?
