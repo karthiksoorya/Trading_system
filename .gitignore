@@ -188,3 +188,4 @@ docs/credentials.txt
 .engine.pid
 gdrive_credentials.json
 gdrive_token.json
+AGENT_KNOWLEDGE.md
