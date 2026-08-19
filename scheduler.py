@@ -254,27 +254,21 @@ def _scan_core():
 
             if _auto_first and trades_today() == 0 and _no_open_trade:
                 # ── Auto-execute the first trade of the day ───────────────
-                logger.info("AUTO-TRADE: first trade of day — auto-approving signal #%d", sig_id)
-                approve_signal(sig_id)
+                logger.info("AUTO-TRADE: first trade of day — attempting signal #%d", sig_id)
                 _auto_ok = False
                 if _settings.get("MODE") == "live":
                     try:
                         from brokers.kite_adapter import KiteAdapter as _KA
                         _k = _KA()
                         if not _k._token_loaded:
-                            logger.warning("AUTO-TRADE skipped — no Kite token. Sending for manual approval.")
-                            notify.signal_detected(
-                                signal_id=sig_id, zone_class=signal.zone.zone_class,
-                                zone_type=signal.zone.zone_type, timeframe=tf,
-                                entry=signal.entry, sl=signal.stop_loss,
-                                target=signal.intraday_target, score=signal.boosters.total,
-                                confluence=signal.confluence.label(),
-                            )
+                            logger.warning("AUTO-TRADE: no Kite token — falling back to manual approval.")
                         else:
                             _k.validate_entry(signal.entry, signal.stop_loss, signal.zone.zone_class)
                             _contract = _k.get_options_contract(signal.entry, signal.zone.zone_class)
                             _qty      = _contract["lot_size"]
                             _oid      = _k.place_options_order(_contract["symbol"], "BUY", _qty)
+                            # Order placed — approve now and record
+                            approve_signal(sig_id)
                             update_signal_order(sig_id, _oid, _contract["symbol"], _qty)
                             logger.info("AUTO-TRADE placed: %s order #%s", _contract["symbol"], _oid)
                             time.sleep(3)
@@ -288,20 +282,27 @@ def _scan_core():
                             )
                             _auto_ok = True
                     except Exception as _ae:
-                        logger.error("AUTO-TRADE FAILED for signal #%d: %s", sig_id, _ae)
-                        reject_signal(sig_id, f"Auto-trade failed: {_ae}")
-                        notify._send(
-                            f"❌ Auto-trade FAILED for signal #{sig_id}:\n{_ae}\n"
-                            f"Signal auto-rejected — next signal needs manual approval."
-                        )
+                        logger.warning("AUTO-TRADE skipped for signal #%d: %s — sending for manual approval", sig_id, _ae)
+                        notify._send(f"⚠️ Auto-trade skipped for #{sig_id}:\n{_ae}\nSending for manual approval.")
                 else:
-                    # Paper mode: auto-approve silently (no real order)
+                    # Paper mode: auto-approve without Kite order
+                    approve_signal(sig_id)
                     notify._send(
                         f"🤖 <b>Auto-Trade #{sig_id} (Paper)</b>\n"
                         f"Entry: {signal.entry:.2f} | SL: {signal.stop_loss:.2f} | "
                         f"Target: {signal.intraday_target:.2f}\nMonitoring..."
                     )
                     _auto_ok = True
+
+                # If auto-trade didn't happen, fall back to normal Telegram approval
+                if not _auto_ok:
+                    notify.signal_detected(
+                        signal_id=sig_id, zone_class=signal.zone.zone_class,
+                        zone_type=signal.zone.zone_type, timeframe=tf,
+                        entry=signal.entry, sl=signal.stop_loss,
+                        target=signal.intraday_target, score=signal.boosters.total,
+                        confluence=signal.confluence.label(),
+                    )
             else:
                 # ── Normal flow: send Telegram notification for manual approval ──
                 notify.signal_detected(
