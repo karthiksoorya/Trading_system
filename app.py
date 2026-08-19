@@ -1719,4 +1719,29 @@ cd ~/Trading_system && git pull && sudo systemctl restart trading
 - 8501 — Streamlit dashboard (public)
         """)
 
+    # ── Lessons Learned ───────────────────────────────────────────────────
+    with st.expander("📝 Lessons Learned from Real Trades", expanded=False):
+        st.markdown("""
+**Aug 17, 2026 — First live day (3/3 target hits ✅)**
+- Demand zones (CE) work best on strong UP trending days
+- Never close manually on Kite — always use Telegram "Early Exit" button or dashboard close
+- Manual Kite close while system is open = double-exit risk (system places second SELL → naked short)
+
+**Aug 18, 2026 — Expiry Tuesday (no signals)**
+- Expiry days are noisy — zones get violated more often, signal quality drops
+
+**Aug 19, 2026 — First supply zone trade (loss ❌)**
+- Supply zones (PE) need a STRONG down-trending day, not a ranging/weak day
+- Enabling a new feature (supply zones) for the first time on a live day is risky — observe in paper first
+- Reject signals when you're distracted (phone call, multitasking) — a bad trade costs more than a missed one
+
+---
+
+**Rules that hold:**
+1. Check 60min trend before approving — if trend is against your zone class, skip
+2. Only approve when you can watch the trade for the next 30 minutes
+3. One trade at a time — never have two open positions
+4. Let the system exit — don't touch Kite manually after approving
+        """)
+
     st.info("💡 Update this tab whenever you discover something new — it's your permanent reference.")
