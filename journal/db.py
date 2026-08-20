@@ -225,6 +225,16 @@ def update_signal_order(signal_id: int, kite_order_id: str, options_symbol: str,
         )
 
 
+def update_signal_sl(signal_id: int, new_sl: float) -> None:
+    """Move stop loss to a new level (used for breakeven SL)."""
+    with _conn() as con:
+        con.execute(
+            "UPDATE signals SET stop_loss=? WHERE id=?",
+            (new_sl, signal_id),
+        )
+    logger.info("Signal #%d SL updated to %.2f (breakeven)", signal_id, new_sl)
+
+
 def update_signal_entry_price(signal_id: int, options_entry_price: float) -> None:
     """Store actual options premium paid after BUY order fills."""
     with _conn() as con:

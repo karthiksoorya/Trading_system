@@ -26,7 +26,8 @@ from engine.signals import generate_signal
 from engine.position_size import calculate as size_trade
 from journal.db import (init_db, log_signal, trades_today, daily_pnl, get_open_trades,
                         close_trade, zone_signaled_today, expire_old_pending,
-                        approve_signal, update_signal_order, update_signal_entry_price, reject_signal)
+                        approve_signal, update_signal_order, update_signal_entry_price,
+                        reject_signal, update_signal_sl)
 from journal.export import export_day
 import notify
 
@@ -360,8 +361,24 @@ def monitor_open_trades():
         t = dict(row)
         tid        = t["id"]
         zone_class = t["zone_class"]
+        entry      = t["entry"]
         stop_loss  = t["stop_loss"]
         target     = t["intraday_target"]
+
+        # ── Breakeven SL: once 1:1 R:R is reached, move SL to entry ─────────
+        risk = abs(entry - stop_loss)
+        breakeven_not_applied = abs(stop_loss - entry) > 0.5   # tolerance for float compare
+        if breakeven_not_applied:
+            one_to_one = (entry + risk) if zone_class == "demand" else (entry - risk)
+            hit_one_to_one = (
+                (zone_class == "demand" and ltp >= one_to_one) or
+                (zone_class == "supply" and ltp <= one_to_one)
+            )
+            if hit_one_to_one:
+                update_signal_sl(tid, entry)
+                stop_loss = entry          # use updated SL for this iteration
+                notify.breakeven_applied(tid, entry)
+                logger.info("BREAKEVEN SL applied for #%d — SL moved to entry %.2f", tid, entry)
 
         closed = False
         if zone_class == "demand":          # expecting price to rise

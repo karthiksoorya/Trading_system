@@ -100,6 +100,14 @@ def trade_approved(signal_id: int, entry: float, sl: float, target: float):
     )
 
 
+def breakeven_applied(signal_id: int, entry: float):
+    _send(
+        f"🔒 <b>Trade #{signal_id} — Breakeven SL Applied</b>\n"
+        f"Price reached 1:1 R:R — SL moved to entry {entry:.2f}.\n"
+        f"Worst case is now breakeven (zero loss)."
+    )
+
+
 def trade_closed(signal_id: int, exit_price: float, reason: str, pnl: float):
     if reason == "target":
         emoji = "🎯"
