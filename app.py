@@ -1744,4 +1744,34 @@ cd ~/Trading_system && git pull && sudo systemctl restart trading
 4. Let the system exit — don't touch Kite manually after approving
         """)
 
+    # ── Roadmap / Future Plans ────────────────────────────────────────────
+    with st.expander("🗺️ Roadmap — What's Planned Next"):
+        st.markdown("""
+### Instruments
+- [x] **Nifty 50** — live trading, working ✅
+- [ ] **Bank Nifty** — higher volatility, higher premium; add after Nifty is consistently profitable
+- [ ] **Nifty Midcap / FinNifty** — evaluate after Bank Nifty
+
+### Strategy Improvements
+- [x] Breakeven SL — SL moves to entry at 1:1 R:R ✅ *(Aug 2026)*
+- [ ] **Trailing SL** — follow price to lock in more profit
+- [ ] **Curve analysis** — check HTF position before entering (Actions Table)
+- [ ] **HPA levels** — mark Previous Day High/Low, Current Day High/Low, Big Round Numbers
+- [ ] **First Trouble Area (FTA)** — skip trade if opposing zone sits between entry and target
+- [ ] **Opening bias filter** — Opening Low = Bullish, Opening High = Bearish
+
+### Risk & Execution
+- [ ] **Position verification before SELL** — check Kite positions API to prevent naked short
+- [ ] **Options-based SL** — stop out if option premium drops X% regardless of index
+- [ ] **Score ≥ 10 for auto-execution** — training says Type 1 entry only at score 10
+
+### Automation
+- [ ] **Full agent mode** — remove all human approvals, system decides end-to-end
+- [ ] **Auto Kite login** — headless browser to renew token daily without manual step
+
+### Data & Reporting
+- [ ] **Live options P&L on dashboard** — real-time premium tracking per open trade
+- [ ] **Weekly/monthly summary** — cumulative stats across days
+        """)
+
     st.info("💡 Update this tab whenever you discover something new — it's your permanent reference.")
