@@ -13,12 +13,16 @@ Multi-timeframe confluence flow:
 """
 
 import logging
+import threading
 import time
 from datetime import date, datetime, timedelta
 
 import schedule
 
 import config
+
+# BUG 2 fix: prevent simultaneous exit orders from monitor + Telegram/dashboard
+_exit_lock = threading.Lock()
 from brokers import get_broker
 from engine.confluence import check_confluence
 from engine.zones import detect_zones, update_zone_state
@@ -320,7 +324,13 @@ def _scan_core():
 
 
 def _live_exit(trade: dict, reason: str):
-    """Place Kite SELL order for live trades and record fill price. Never blocks close."""
+    """Place Kite SELL order for live trades and record fill price. Never blocks close.
+
+    BUG 1 fix: uses stored options_lot_size from DB (not live get_lot_size()) so the
+               SELL quantity always matches the original BUY quantity.
+    BUG 2 fix: acquires _exit_lock so only one exit order is placed even when
+               monitor_open_trades and Telegram close fire simultaneously.
+    """
     if config.load_settings().get("MODE") != "live":
         return
     opts_sym = trade.get("options_symbol")
@@ -328,21 +338,35 @@ def _live_exit(trade: dict, reason: str):
         logger.warning("Live exit skipped — no options_symbol for trade #%d", trade["id"])
         notify._send(f"⚠️ Exit #{trade['id']} ({reason}): no options symbol — close manually on Kite!")
         return
-    try:
-        from brokers.kite_adapter import KiteAdapter
-        from journal.db import update_signal_exit_order
-        _ka = KiteAdapter()
-        _sell_oid = _ka.place_options_order(opts_sym, "SELL", _ka.get_lot_size())
-        logger.info("Live exit order placed: SELL %s (%s) → order #%s", opts_sym, reason, _sell_oid)
-        # Wait for fill then record actual exit premium
-        time.sleep(3)
-        _fill = _ka.get_order_fill_price(_sell_oid)
-        if _fill > 0:
-            update_signal_exit_order(trade["id"], _sell_oid, _fill)
-            logger.info("Options exit price recorded: %.2f for trade #%d", _fill, trade["id"])
-    except Exception as ex:
-        logger.error("Live exit order FAILED for %s: %s", opts_sym, ex)
-        notify._send(f"⚠️ Exit order FAILED for {opts_sym} ({reason}): {ex}\nClose manually on Kite!")
+
+    # Re-check DB status under the lock — bail out if already closed by another thread
+    with _exit_lock:
+        from journal.db import get_signal
+        current = get_signal(trade["id"])
+        if current and current["status"] == "closed":
+            logger.info("_live_exit: trade #%d already closed — skipping duplicate SELL", trade["id"])
+            return
+
+        # BUG 1 fix: use the lot size that was stored at entry time
+        qty = trade.get("options_lot_size") or 0
+        try:
+            from brokers.kite_adapter import KiteAdapter
+            from journal.db import update_signal_exit_order
+            _ka = KiteAdapter()
+            if not qty:
+                qty = _ka.get_lot_size()   # fallback only if entry qty was never stored
+                logger.warning("options_lot_size missing for trade #%d — falling back to current lot size %d", trade["id"], qty)
+            _sell_oid = _ka.place_options_order(opts_sym, "SELL", qty)
+            logger.info("Live exit order placed: SELL %s ×%d (%s) → order #%s", opts_sym, qty, reason, _sell_oid)
+            # Wait for fill then record actual exit premium
+            time.sleep(3)
+            _fill = _ka.get_order_fill_price(_sell_oid)
+            if _fill > 0:
+                update_signal_exit_order(trade["id"], _sell_oid, _fill)
+                logger.info("Options exit price recorded: %.2f for trade #%d", _fill, trade["id"])
+        except Exception as ex:
+            logger.error("Live exit order FAILED for %s: %s", opts_sym, ex)
+            notify._send(f"⚠️ Exit order FAILED for {opts_sym} ({reason}): {ex}\nClose manually on Kite!")
 
 
 def monitor_open_trades():
@@ -368,6 +392,7 @@ def monitor_open_trades():
         # ── Breakeven SL: once 1:1 R:R is reached, move SL to entry ─────────
         risk = abs(entry - stop_loss)
         breakeven_not_applied = abs(stop_loss - entry) > 0.5   # tolerance for float compare
+        breakeven_just_applied = False   # BUG 3 fix: track if we moved SL this tick
         if breakeven_not_applied:
             one_to_one = (entry + risk) if zone_class == "demand" else (entry - risk)
             hit_one_to_one = (
@@ -377,8 +402,14 @@ def monitor_open_trades():
             if hit_one_to_one:
                 update_signal_sl(tid, entry)
                 stop_loss = entry          # use updated SL for this iteration
+                breakeven_just_applied = True   # BUG 3 fix: skip exit check this tick
                 notify.breakeven_applied(tid, entry)
                 logger.info("BREAKEVEN SL applied for #%d — SL moved to entry %.2f", tid, entry)
+
+        # BUG 3 fix: if breakeven was just applied this tick, skip the exit check.
+        # Give price one full tick to settle before a breakeven-entry SL can trigger.
+        if breakeven_just_applied:
+            continue
 
         closed = False
         if zone_class == "demand":          # expecting price to rise

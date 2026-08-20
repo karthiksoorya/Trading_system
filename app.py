@@ -780,7 +780,9 @@ def _approvals_tab():
                                     from brokers.kite_adapter import KiteAdapter as _KA2
                                     from journal.db import update_signal_exit_order as _useo
                                     _ka2 = _KA2()
-                                    _sell_oid = _ka2.place_options_order(_opts_sym, "SELL", _ka2.get_lot_size())
+                                    # BUG 1 fix: use stored lot size from entry, not live get_lot_size()
+                                    _qty2 = t.get("options_lot_size") or _ka2.get_lot_size()
+                                    _sell_oid = _ka2.place_options_order(_opts_sym, "SELL", _qty2)
                                     st.toast(f"LIVE EXIT: SELL {_opts_sym} → order #{_sell_oid}", icon="🔴")
                                     import time as _t2; _t2.sleep(3)
                                     _sell_fill = _ka2.get_order_fill_price(_sell_oid)

@@ -166,6 +166,11 @@ def close_trade(
         logger.warning("Signal id=%s not found.", signal_id)
         return
 
+    # BUG 10 fix: guard against double-close (race condition between monitor + Telegram/dashboard)
+    if entry_row["status"] == "closed":
+        logger.warning("Signal id=%s already closed — skipping duplicate close.", signal_id)
+        return
+
     entry     = entry_row["entry"]
     zone_class = entry_row["zone_class"]
     pnl_points = (exit_price - entry) if zone_class == "demand" else (entry - exit_price)

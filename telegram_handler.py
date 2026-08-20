@@ -157,8 +157,13 @@ def _handle_callback(cb: dict, token: str):
                         from brokers.kite_adapter import KiteAdapter
                         from journal.db import update_signal_exit_order
                         _ka = KiteAdapter()
-                        _sell_oid = _ka.place_options_order(opts_sym, "SELL", _ka.get_lot_size())
-                        logger.info("Live exit order placed: SELL %s → #%s", opts_sym, _sell_oid)
+                        # BUG 1 fix: use stored lot size from entry, not live get_lot_size()
+                        qty = _match.get("options_lot_size") or 0
+                        if not qty:
+                            qty = _ka.get_lot_size()
+                            logger.warning("options_lot_size missing for trade #%d — falling back to current lot size %d", _tid, qty)
+                        _sell_oid = _ka.place_options_order(opts_sym, "SELL", qty)
+                        logger.info("Live exit order placed: SELL %s ×%d → #%s", opts_sym, qty, _sell_oid)
                         time.sleep(3)
                         _fill = _ka.get_order_fill_price(_sell_oid)
                         if _fill > 0:
