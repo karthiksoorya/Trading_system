@@ -101,6 +101,7 @@ def _migrate(con):
         ("options_exit_price",  "REAL"),
         ("options_exit_order_id", "TEXT"),
         ("options_lot_size",    "INTEGER"),
+        ("closed_by",           "TEXT"),
     ]
     for col, definition in migrations:
         if col not in existing:
@@ -155,8 +156,11 @@ def close_trade(
     exit_price: float,
     exit_reason: str,
     notes: str = "",
+    closed_by: str = "system",
 ):
-    """Update a signal row when the trade closes."""
+    """Update a signal row when the trade closes.
+    closed_by: 'system' (target/SL), 'telegram', 'dashboard', 'eod'
+    """
     entry_row = get_signal(signal_id)
     if not entry_row:
         logger.warning("Signal id=%s not found.", signal_id)
@@ -172,7 +176,7 @@ def close_trade(
             """
             UPDATE signals
             SET status='closed', exit_time=?, exit_price=?, exit_reason=?,
-                pnl_points=?, result=?, notes=?
+                pnl_points=?, result=?, notes=?, closed_by=?
             WHERE id=?
             """,
             (
@@ -182,6 +186,7 @@ def close_trade(
                 round(pnl_points, 2),
                 result,
                 notes,
+                closed_by,
                 signal_id,
             ),
         )

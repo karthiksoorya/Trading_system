@@ -385,14 +385,14 @@ def monitor_open_trades():
             if ltp >= target:
                 pnl = round(target - t["entry"], 2)
                 _live_exit(t, "target")
-                close_trade(tid, target, "target")
+                close_trade(tid, target, "target", closed_by="system")
                 logger.info("AUTO-EXIT #%d TARGET hit at %.2f (LTP %.2f)", tid, target, ltp)
                 notify.trade_closed(tid, target, "target", pnl)
                 closed = True
             elif ltp <= stop_loss:
                 pnl = round(stop_loss - t["entry"], 2)
                 _live_exit(t, "stoploss")
-                close_trade(tid, stop_loss, "stoploss")
+                close_trade(tid, stop_loss, "stoploss", closed_by="system")
                 logger.info("AUTO-EXIT #%d STOPLOSS hit at %.2f (LTP %.2f)", tid, stop_loss, ltp)
                 notify.trade_closed(tid, stop_loss, "stoploss", pnl)
                 closed = True
@@ -400,14 +400,14 @@ def monitor_open_trades():
             if ltp <= target:
                 pnl = round(t["entry"] - target, 2)
                 _live_exit(t, "target")
-                close_trade(tid, target, "target")
+                close_trade(tid, target, "target", closed_by="system")
                 logger.info("AUTO-EXIT #%d TARGET hit at %.2f (LTP %.2f)", tid, target, ltp)
                 notify.trade_closed(tid, target, "target", pnl)
                 closed = True
             elif ltp >= stop_loss:
                 pnl = round(t["entry"] - stop_loss, 2)
                 _live_exit(t, "stoploss")
-                close_trade(tid, stop_loss, "stoploss")
+                close_trade(tid, stop_loss, "stoploss", closed_by="system")
                 logger.info("AUTO-EXIT #%d STOPLOSS hit at %.2f (LTP %.2f)", tid, stop_loss, ltp)
                 notify.trade_closed(tid, stop_loss, "stoploss", pnl)
                 closed = True
@@ -462,7 +462,7 @@ def end_of_day():
             t = dict(row)
             exit_price = ltp or t["entry"]   # fallback to entry if LTP unavailable
             _live_exit(t, "eod")
-            close_trade(t["id"], exit_price, "eod")
+            close_trade(t["id"], exit_price, "eod", closed_by="eod")
             logger.info("EOD close #%d at %.2f", t["id"], exit_price)
 
     path = export_day()

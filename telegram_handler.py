@@ -137,39 +137,37 @@ def _handle_callback(cb: dict, token: str):
                     ltp = get_broker().get_ltp(config.NIFTY_SYMBOL)
                 except Exception:
                     ltp = match["entry"]
-                # ── Live: place real exit order ───────────────────────────
-                if config.load_settings().get("MODE") == "live":
-                    opts_sym = match.get("options_symbol")
-                    if opts_sym:
-                        try:
-                            from brokers.kite_adapter import KiteAdapter
-                            _ka = KiteAdapter()
-                            _sell_oid = _ka.place_options_order(opts_sym, "SELL", _ka.get_lot_size())
-                            logger.info("Live exit order placed: SELL %s → #%s", opts_sym, _sell_oid)
-                            import threading as _thr
-                            def _fetch_exit_fill(_ka=_ka, _oid=_sell_oid, _tid=trade_id):
-                                import time as _t; _t.sleep(3)
-                                try:
-                                    _fill = _ka.get_order_fill_price(_oid)
-                                    if _fill > 0:
-                                        from journal.db import update_signal_exit_order
-                                        update_signal_exit_order(_tid, _oid, _fill)
-                                except Exception as _fe:
-                                    logger.debug("Exit fill fetch failed: %s", _fe)
-                            _thr.Thread(target=_fetch_exit_fill, daemon=True).start()
-                        except Exception as ex:
-                            notify._send(f"⚠️ Exit order FAILED for {opts_sym}: {ex}\nClose manually on Kite!")
-                            logger.error("Live exit order failed: %s", ex)
-                    else:
-                        notify._send(f"⚠️ No options symbol for trade #{trade_id} — close manually on Kite!")
                 pnl = round(
                     (ltp - match["entry"]) if match["zone_class"] == "demand"
                     else (match["entry"] - ltp), 2
                 )
-                close_trade(trade_id, ltp, "manual")
-                notify.trade_closed(trade_id, ltp, "manual", pnl)
-                answer = f"🚨 Trade #{trade_id} closed manually at {ltp:.2f} | P&L: {pnl:+.2f} pts"
-                logger.info("Telegram manually closed trade #%d at %.2f", trade_id, ltp)
+                close_trade(trade_id, ltp, "manual", closed_by="telegram")
+                answer = f"🚨 Trade #{trade_id} closing at {ltp:.2f} | P&L: {pnl:+.2f} pts"
+                logger.info("Telegram manually closing trade #%d at %.2f", trade_id, ltp)
+                # ── Live: place SELL in background so Telegram callback answers fast ──
+                def _do_live_close(_match=match, _tid=trade_id, _ltp=ltp, _pnl=pnl):
+                    if config.load_settings().get("MODE") != "live":
+                        notify.trade_closed(_tid, _ltp, "manual", _pnl)
+                        return
+                    opts_sym = _match.get("options_symbol")
+                    if not opts_sym:
+                        notify._send(f"⚠️ No options symbol for trade #{_tid} — close manually on Kite!")
+                        return
+                    try:
+                        from brokers.kite_adapter import KiteAdapter
+                        from journal.db import update_signal_exit_order
+                        _ka = KiteAdapter()
+                        _sell_oid = _ka.place_options_order(opts_sym, "SELL", _ka.get_lot_size())
+                        logger.info("Live exit order placed: SELL %s → #%s", opts_sym, _sell_oid)
+                        time.sleep(3)
+                        _fill = _ka.get_order_fill_price(_sell_oid)
+                        if _fill > 0:
+                            update_signal_exit_order(_tid, _sell_oid, _fill)
+                        notify.trade_closed(_tid, _ltp, "manual", _pnl)
+                    except Exception as ex:
+                        notify._send(f"⚠️ Exit order FAILED for {opts_sym}: {ex}\nClose manually on Kite!")
+                        logger.error("Live exit order failed: %s", ex)
+                threading.Thread(target=_do_live_close, daemon=True).start()
 
     except Exception as e:
         answer = f"⚠️ Error: {e}"

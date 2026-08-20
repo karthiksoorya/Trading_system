@@ -790,7 +790,7 @@ def _approvals_tab():
                                     st.error(f"⚠️ Exit order failed: {_e2}\nClose manually on Kite!")
                             else:
                                 st.warning("No options symbol stored — close position manually on Kite.")
-                        close_trade(t["id"], _exit, "manual")
+                        close_trade(t["id"], _exit, "manual", closed_by="dashboard")
                         import notify as _n
                         _n.trade_closed(t["id"], _exit, "manual", _pnl)
                         st.session_state.pop(_confirm_key, None)
@@ -1007,7 +1007,7 @@ with tab_signals:
                     if exit_price == 0:
                         st.error("Enter a valid exit price.")
                     else:
-                        close_trade(trade_id, exit_price, exit_reason, notes)
+                        close_trade(trade_id, exit_price, exit_reason, notes, closed_by="dashboard")
                         st.success(f"Trade #{trade_id} closed at {exit_price}.")
                         st.rerun()
         else:
