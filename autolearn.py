@@ -35,11 +35,18 @@ def check_and_learn():
 
 def _run():
     import notify
+    from datetime import date, timedelta
 
-    # Load all closed trades
+    # BUG 22 fix: analyse only the last 90 days of trades instead of full history.
+    # Old trades from a different market regime or before settings changes were pulling
+    # down win rates for zone types that are now performing well.
+    RECENCY_DAYS = 90
+    cutoff = (date.today() - timedelta(days=RECENCY_DAYS)).isoformat()
+
     con = sqlite3.connect(config.DB_PATH)
     rows = con.execute(
-        "SELECT zone_type, timeframe, pnl_points FROM signals WHERE result IS NOT NULL"
+        "SELECT zone_type, timeframe, pnl_points FROM signals WHERE result IS NOT NULL AND date >= ?",
+        (cutoff,),
     ).fetchall()
     con.close()
 
@@ -51,7 +58,7 @@ def _run():
     if total % MIN_TRADES != 0:
         return
 
-    logger.info("Auto-learn triggered at %d closed trades.", total)
+    logger.info("Auto-learn triggered at %d closed trades (last %d days).", total, RECENCY_DAYS)
 
     settings            = config.load_settings()
     disabled_zone_types = set(settings.get("DISABLED_ZONE_TYPES", []))

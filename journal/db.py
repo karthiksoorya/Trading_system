@@ -111,6 +111,8 @@ def _migrate(con):
     con.execute(
         "UPDATE signals SET status='closed' WHERE status='approved' AND exit_price IS NOT NULL"
     )
+    # BUG 21 fix: backfill any rows with NULL status that ALTER TABLE left behind
+    con.execute("UPDATE signals SET status='pending' WHERE status IS NULL")
     # Backfill: any row without a mode tag was logged in paper mode
     con.execute("UPDATE signals SET mode='paper' WHERE mode IS NULL")
 

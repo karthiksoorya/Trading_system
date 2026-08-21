@@ -25,7 +25,9 @@ class Signal:
 
     @property
     def is_tradeable(self) -> bool:
-        return self.boosters.total >= config.MIN_BOOSTER_SCORE
+        # BUG 20 fix: read live setting instead of stale module-level config.MIN_BOOSTER_SCORE
+        min_score = config.load_settings().get("MIN_BOOSTER_SCORE", config.MIN_BOOSTER_SCORE)
+        return self.boosters.total >= min_score
 
     def as_dict(self) -> dict:
         return {
