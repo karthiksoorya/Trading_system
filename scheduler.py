@@ -110,13 +110,17 @@ def _scan_core():
     ltp = broker.get_ltp(config.NIFTY_SYMBOL)
     logger.info("LTP: %.2f", ltp)
 
-    # Active filters (re-read each scan so UI changes apply immediately)
+    # Active filters — read settings ONCE per scan so all decisions use consistent values
+    # BUG 13 fix: previously load_settings() was called 3+ times during a single scan,
+    # meaning a dashboard change mid-scan could cause different parts to see different settings.
     _s                  = config.load_settings()
     active_tfs          = _s.get("SCAN_TIMEFRAMES",      _TF_ORDER)
     active_classes      = set(_s.get("SCAN_ZONE_CLASSES",  ["demand", "supply"]))
     min_confluence      = _s.get("MIN_CONFLUENCE",         config.MIN_CONFLUENCE)
     zone_approach_pts   = _s.get("ZONE_APPROACH_POINTS",   config.ZONE_APPROACH_POINTS)
     disabled_zone_types = set(_s.get("DISABLED_ZONE_TYPES", []))
+    entry_tf            = _s.get("ENTRY_TIMEFRAME",        config.TF_LOWER)
+    _auto_first         = _s.get("AUTO_FIRST_TRADE",       False)
 
     # ── Scan window filter ────────────────────────────────────────────────
     _win    = _s.get("SCAN_WINDOW", {"start": "09:15", "end": "15:25"})
@@ -152,7 +156,7 @@ def _scan_core():
     # ── Step 2: generate signals ──────────────────────────────────────────
     # Only the selected entry TF generates signals.
     # All other TFs are used for confluence scoring only.
-    entry_tf = config.load_settings().get("ENTRY_TIMEFRAME", config.TF_LOWER)
+    # entry_tf already read from _s above (BUG 13 fix)
     for i, tf in enumerate(_TF_ORDER):
         if tf not in active_tfs:
             continue
@@ -253,15 +257,14 @@ def _scan_core():
                 signal.entry, signal.stop_loss, signal.intraday_target,
             )
 
-            _settings      = config.load_settings()
-            _auto_first    = _settings.get("AUTO_FIRST_TRADE", False)
+            # _s and _auto_first already read at top of scan (BUG 13 fix)
             _no_open_trade = not get_open_trades()
 
             if _auto_first and trades_today() == 0 and _no_open_trade:
                 # ── Auto-execute the first trade of the day ───────────────
                 logger.info("AUTO-TRADE: first trade of day — attempting signal #%d", sig_id)
                 _auto_ok = False
-                if _settings.get("MODE") == "live":
+                if _s.get("MODE") == "live":
                     try:
                         from brokers.kite_adapter import KiteAdapter as _KA
                         _k = _KA()
@@ -467,17 +470,21 @@ def check_pending_freshness():
     for row in pending:
         t          = dict(row)
         proximal   = t["proximal"]
+        distal     = t["distal"]
         zone_class = t["zone_class"]
         sig_id     = t["id"]
-        touched = (
-            (zone_class == "demand" and ltp <= proximal) or
-            (zone_class == "supply" and ltp >= proximal)
-        )
+        # BUG 18 fix: expire only when LTP is actually INSIDE the zone (between distal and proximal),
+        # not just anywhere below proximal (demand) or above proximal (supply).
+        # Old logic expired signals even when LTP was far below the zone, which is too aggressive.
+        if zone_class == "demand":
+            touched = distal <= ltp <= proximal
+        else:
+            touched = proximal <= ltp <= distal
         if touched:
-            _expire(sig_id, f"touched while pending — LTP {ltp:.2f} crossed proximal {proximal:.2f}")
+            _expire(sig_id, f"touched while pending — LTP {ltp:.2f} inside zone [{distal:.2f}–{proximal:.2f}]")
             logger.info(
-                "Auto-expired pending #%d — LTP %.2f touched proximal %.2f while awaiting approval",
-                sig_id, ltp, proximal,
+                "Auto-expired pending #%d — LTP %.2f inside zone [%.2f–%.2f] while awaiting approval",
+                sig_id, ltp, distal, proximal,
             )
 
 

@@ -1266,10 +1266,13 @@ with tab_learning:
         label_visibility="collapsed",
     )
     _learn_mode_sql = {"All": None, "📄 Paper": "paper", "🔴 Live": "live"}[_learn_mode]
-    _learn_where = (
-        f"result IS NOT NULL AND mode='{_learn_mode_sql}'"
-        if _learn_mode_sql else "result IS NOT NULL"
-    )
+    # BUG 12 fix: build WHERE clause with parameterized queries instead of string interpolation
+    if _learn_mode_sql:
+        _learn_where_sql  = "result IS NOT NULL AND mode = ?"
+        _learn_where_args = (_learn_mode_sql,)
+    else:
+        _learn_where_sql  = "result IS NOT NULL"
+        _learn_where_args = ()
     st.header(f"🤖 What the System Has Learned — {'All Trades' if not _learn_mode_sql else _learn_mode_sql.title()}")
     st.caption(
         "Auto-learn runs after every 10 closed trades. "
@@ -1287,7 +1290,8 @@ with tab_learning:
     try:
         _con_l = sqlite3.connect(config.DB_PATH)
         _rows_l = _con_l.execute(
-            f"SELECT zone_type, pnl_points FROM signals WHERE {_learn_where}"
+            f"SELECT zone_type, pnl_points FROM signals WHERE {_learn_where_sql}",
+            _learn_where_args,
         ).fetchall()
         _con_l.close()
 
@@ -1325,7 +1329,8 @@ with tab_learning:
     try:
         _con_l2 = sqlite3.connect(config.DB_PATH)
         _rows_l2 = _con_l2.execute(
-            f"SELECT timeframe, pnl_points FROM signals WHERE {_learn_where}"
+            f"SELECT timeframe, pnl_points FROM signals WHERE {_learn_where_sql}",
+            _learn_where_args,
         ).fetchall()
         _con_l2.close()
 
@@ -1389,7 +1394,8 @@ with tab_learning:
         import collections as _col
         _con_t = sqlite3.connect(config.DB_PATH)
         _rows_t = _con_t.execute(
-            f"SELECT time_signal, pnl_points, result FROM signals WHERE {_learn_where}"
+            f"SELECT time_signal, pnl_points, result FROM signals WHERE {_learn_where_sql}",
+            _learn_where_args,
         ).fetchall()
         _con_t.close()
 
@@ -1550,7 +1556,7 @@ If kite_order_id is empty in Signals tab → order was never placed.
         st.markdown("""
 **Expiry:** Every Tuesday (NSE changed from Thursday — effective 2026)
 
-**Lot size:** 75 units per lot (NSE revised Jan 2026 — auto-fetched from Kite)
+**Lot size:** 65 units per lot (NSE revised Jan 2026, reduced from 75 — auto-fetched from Kite)
 
 **Strike intervals:** Every 50 points (e.g., 24300, 24350, 24400...)
 

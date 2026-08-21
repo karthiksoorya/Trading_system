@@ -321,14 +321,21 @@ def expire_stale_pending():
 
 
 def zone_signaled_today(zone_class: str, zone_type: str, timeframe: str, proximal: float) -> bool:
-    """Return True if this exact zone already has a signal logged today."""
+    """Return True if this exact zone already has a signal logged today.
+
+    BUG 19 fix: proximal is a REAL (float) in SQLite. Exact equality can fail due to
+    floating-point epsilon differences between two separately-computed identical prices.
+    Use a small tolerance band (±0.01 pts) instead of exact match.
+    """
     with _conn() as con:
         row = con.execute(
             """SELECT id FROM signals
-               WHERE date=? AND zone_class=? AND zone_type=? AND timeframe=? AND proximal=?
+               WHERE date=? AND zone_class=? AND zone_type=? AND timeframe=?
+               AND proximal BETWEEN ? AND ?
                AND status != 'rejected'
                LIMIT 1""",
-            (date.today().isoformat(), zone_class, zone_type, timeframe, proximal),
+            (date.today().isoformat(), zone_class, zone_type, timeframe,
+             proximal - 0.01, proximal + 0.01),
         ).fetchone()
         return row is not None
 

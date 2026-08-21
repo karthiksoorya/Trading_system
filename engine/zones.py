@@ -132,12 +132,16 @@ def update_zone_state(zone: Zone, candles_after: list[Candle]) -> Zone:
             if c.close < zone.distal:       # closed below distal → zone broken
                 zone.is_valid = False
                 break
-            touched = zone.contains_price(c.low)
+            # BUG 15 fix: count touch if wick OR body enters the zone, not just wick.
+            # A candle whose body is fully inside the zone but whose low doesn't reach
+            # proximal was previously not counted, under-counting touches.
+            touched = zone.contains_price(c.low) or zone.contains_price(min(c.open, c.close))
         else:
             if c.close > zone.distal:       # closed above distal → zone broken
                 zone.is_valid = False
                 break
-            touched = zone.contains_price(c.high)
+            # BUG 15 fix: same for supply — check high wick OR body top
+            touched = zone.contains_price(c.high) or zone.contains_price(max(c.open, c.close))
 
         if touched and not inside:
             zone.touch_count += 1
