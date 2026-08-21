@@ -529,7 +529,8 @@ def run():
     import telegram_handler
     telegram_handler.start_polling()
 
-    schedule.every().day.at(config.SCAN_START).do(scan)
+    # BUG 5 fix: removed every().day.at(SCAN_START) — the every(5).minutes job already
+    # fires at 10:05, so keeping both caused a double-scan and potential duplicate signals.
     schedule.every(5).minutes.do(scan)
     schedule.every(1).minutes.do(monitor_open_trades)
     schedule.every(1).minutes.do(check_pending_freshness)
@@ -561,7 +562,11 @@ def run():
         # ── Auto-stop after market close ──────────────────────────────────
         if now.weekday() < 5 and hhmm >= "15:35":
             logger.info("Market closed (15:35) — engine shutting down.")
-            end_of_day()
+            # BUG 11 fix: end_of_day() is already scheduled at 15:20.
+            # Only call it here if it somehow didn't run (open trades still exist),
+            # to avoid a second EOD export + duplicate Telegram summary.
+            if get_open_trades():
+                end_of_day()
             config.ENGINE_PID_FILE.unlink(missing_ok=True)
             break
 

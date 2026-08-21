@@ -144,7 +144,7 @@ def log_signal(signal_data: dict) -> int:
             {
                 "date":            now.strftime("%Y-%m-%d"),
                 "time_signal":     now.strftime("%H:%M:%S"),
-                "mode":            config.MODE,
+                "mode":            config.load_settings().get("MODE", config.MODE),  # BUG 4 fix: read live setting not stale module-level value
                 **signal_data,
             },
         )

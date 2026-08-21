@@ -681,7 +681,7 @@ with tab_engine:
                 )
 
     with col_csv:
-        today_csv = config.CSV_DIR / f"{date.today().isoformat()}.csv"
+        today_csv = config.CSV_DIR / f"trades_{date.today().isoformat()}.csv"  # BUG 6 fix: match export.py naming
         if today_csv.exists():
             with open(today_csv, "rb") as f:
                 col_csv.download_button(
@@ -1330,6 +1330,7 @@ with tab_learning:
         _con_l2.close()
 
         if _rows_l2:
+            import collections  # BUG 7 fix: import locally so it's always in scope regardless of zone type block above
             _tf_stats: dict = collections.defaultdict(lambda: {"trades": 0, "wins": 0, "pnl": 0.0})
             for tf, pnl in _rows_l2:
                 _tf_stats[tf]["trades"] += 1
