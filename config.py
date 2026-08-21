@@ -64,6 +64,21 @@ SL_BUFFER_POINTS       = 5
 SIGNAL_EXPIRY_MINUTES  = 45   # pending signals older than this are auto-expired
 ZONE_APPROACH_POINTS   = 50   # LTP must be within this many pts of proximal
 
+# ── Options Exit Rules ─────────────────────────────────────────────────────
+# These protect options P&L independently of the index level.
+# Theta decay and IV crush can destroy options value even when index is right.
+#
+# OPTIONS_TRAIL_PCT: if options premium has gained this % from entry cost,
+#   lock in profit by exiting. e.g. 30 → exit when CE/PE is up 30%.
+#   Set to 0 to disable.
+OPTIONS_TRAIL_PCT   = 30    # exit when options up 30% from entry premium
+#
+# TIME_EXIT_HOUR: close any open trade at this hour (24h) if index target
+#   not yet hit. Prevents theta decay from eating gains in the afternoon.
+#   e.g. 13 → exit at 13:00 if still open.
+#   Set to 0 to disable.
+TIME_EXIT_HOUR      = 13    # close at 13:00 if target not reached
+
 # ── Kite API Credentials (set via environment variables) ──────────────────
 # Export in terminal: set KITE_API_KEY=xxx  /  set KITE_API_SECRET=xxx
 KITE_API_KEY    = os.getenv("KITE_API_KEY", "")
