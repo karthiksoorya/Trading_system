@@ -64,7 +64,11 @@ def detect_zones(candles: list[Candle], timeframe: str) -> list[Zone]:
         if zone:
             zones.append(zone)
 
-        i = j  # leg_out is the candidate for the next leg_in
+        # BUG 9 fix: advance past leg_out to prevent overlapping zones that share
+        # a candle. Previously i = j allowed leg_out to immediately become the next
+        # leg_in, producing zones with a shared boundary candle.
+        # Starting at j + 1 means we look for a completely fresh pattern next.
+        i = j + 1
 
     return zones
 
@@ -88,17 +92,16 @@ def _build_zone(
     if is_demand:
         # Proximal = highest body top across all base candles
         proximal = max(max(c.open, c.close) for c in base)
-        # DBR: leg in is the drop that created the low → include it in distal
-        # RBR: leg in is a rally (high values) → exclude it from distal
-        pool = (base + [leg_out]) if zone_type == "RBR" else ([leg_in] + base + [leg_out])
-        distal = min(c.low for c in pool)
+        # BUG 8 fix: for both DBR and RBR, leg_in establishes the zone's low boundary
+        # so it must always be included in the distal pool.
+        # Previous code excluded leg_in for RBR, giving a higher distal (SL too tight).
+        distal = min(c.low for c in [leg_in] + base + [leg_out])
     else:
         # Proximal = lowest body bottom across all base candles
         proximal = min(min(c.open, c.close) for c in base)
-        # RBD: leg in is the rally that created the high → include it in distal
-        # DBD: leg in is a drop (low values) → exclude it from distal
-        pool = (base + [leg_out]) if zone_type == "DBD" else ([leg_in] + base + [leg_out])
-        distal = max(c.high for c in pool)
+        # BUG 8 fix: for both RBD and DBD, leg_in establishes the zone's high boundary
+        # so it must always be included in the distal pool.
+        distal = max(c.high for c in [leg_in] + base + [leg_out])
 
     return Zone(
         zone_type=zone_type,
