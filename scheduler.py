@@ -399,8 +399,31 @@ def _live_exit(trade: dict, reason: str):
             notify._send(f"⚠️ Exit order FAILED for {opts_sym} ({reason}): {ex}\nClose manually on Kite!")
 
 
+def _get_options_ltp(opts_sym: str) -> float | None:
+    """Fetch current options premium. Returns None on failure — never blocks exit logic."""
+    if not opts_sym:
+        return None
+    try:
+        from brokers.kite_adapter import KiteAdapter
+        _ka = KiteAdapter()
+        return _ka._kite.ltp([f"NFO:{opts_sym}"])[f"NFO:{opts_sym}"]["last_price"]
+    except Exception as e:
+        logger.debug("Options LTP fetch failed for %s: %s", opts_sym, e)
+        return None
+
+
+def _calc_options_pnl(entry_premium: float, current_premium: float, lot_size: int) -> float:
+    """Options P&L in rupees: (exit - entry) × lot_size."""
+    return round((current_premium - entry_premium) * lot_size, 2)
+
+
 def monitor_open_trades():
-    """Check all approved open trades against current LTP. Auto-exit on target or SL hit."""
+    """Check all approved open trades against current LTP. Auto-exit on:
+    1. Index target hit
+    2. Index SL hit
+    3. Options premium up >= OPTIONS_TRAIL_PCT (theta protection)
+    4. Time exit at TIME_EXIT_HOUR (afternoon theta cutoff)
+    """
     open_trades = get_open_trades()
     if not open_trades:
         return
@@ -411,18 +434,30 @@ def monitor_open_trades():
         logger.warning("monitor_open_trades: could not fetch LTP — %s", e)
         return
 
+    _s            = config.load_settings()
+    trail_pct     = _s.get("OPTIONS_TRAIL_PCT", config.OPTIONS_TRAIL_PCT)
+    time_exit_hr  = _s.get("TIME_EXIT_HOUR",    config.TIME_EXIT_HOUR)
+    now_hour      = datetime.now().hour
+    now_minute    = datetime.now().minute
+
     for row in open_trades:
         t = dict(row)
-        tid        = t["id"]
-        zone_class = t["zone_class"]
-        entry      = t["entry"]
-        stop_loss  = t["stop_loss"]
-        target     = t["intraday_target"]
+        tid            = t["id"]
+        zone_class     = t["zone_class"]
+        entry          = t["entry"]
+        stop_loss      = t["stop_loss"]
+        target         = t["intraday_target"]
+        entry_premium  = t.get("options_entry_price") or 0
+        opts_sym       = t.get("options_symbol") or ""
+        lot_size       = t.get("options_lot_size") or config.NIFTY_LOT_SIZE
+
+        # ── Fetch live options premium ────────────────────────────────────
+        current_premium = _get_options_ltp(opts_sym) if opts_sym else None
 
         # ── Breakeven SL: once 1:1 R:R is reached, move SL to entry ─────────
         risk = abs(entry - stop_loss)
-        breakeven_not_applied = abs(stop_loss - entry) > 0.5   # tolerance for float compare
-        breakeven_just_applied = False   # BUG 3 fix: track if we moved SL this tick
+        breakeven_not_applied = abs(stop_loss - entry) > 0.5
+        breakeven_just_applied = False
         if breakeven_not_applied:
             one_to_one = (entry + risk) if zone_class == "demand" else (entry - risk)
             hit_one_to_one = (
@@ -431,47 +466,80 @@ def monitor_open_trades():
             )
             if hit_one_to_one:
                 update_signal_sl(tid, entry)
-                stop_loss = entry          # use updated SL for this iteration
-                breakeven_just_applied = True   # BUG 3 fix: skip exit check this tick
+                stop_loss = entry
+                breakeven_just_applied = True
                 notify.breakeven_applied(tid, entry)
                 logger.info("BREAKEVEN SL applied for #%d — SL moved to entry %.2f", tid, entry)
 
-        # BUG 3 fix: if breakeven was just applied this tick, skip the exit check.
-        # Give price one full tick to settle before a breakeven-entry SL can trigger.
         if breakeven_just_applied:
             continue
 
         closed = False
-        if zone_class == "demand":          # expecting price to rise
+        close_reason = None
+        close_price  = None
+
+        # ── 1. Index target / SL ─────────────────────────────────────────
+        if zone_class == "demand":
             if ltp >= target:
-                pnl = round(target - t["entry"], 2)
-                _live_exit(t, "target")
-                close_trade(tid, target, "target", closed_by="system")
-                logger.info("AUTO-EXIT #%d TARGET hit at %.2f (LTP %.2f)", tid, target, ltp)
-                notify.trade_closed(tid, target, "target", pnl)
-                closed = True
+                close_reason, close_price = "target", target
             elif ltp <= stop_loss:
-                pnl = round(stop_loss - t["entry"], 2)
-                _live_exit(t, "stoploss")
-                close_trade(tid, stop_loss, "stoploss", closed_by="system")
-                logger.info("AUTO-EXIT #%d STOPLOSS hit at %.2f (LTP %.2f)", tid, stop_loss, ltp)
-                notify.trade_closed(tid, stop_loss, "stoploss", pnl)
-                closed = True
-        else:                               # supply — expecting price to fall
+                close_reason, close_price = "stoploss", stop_loss
+        else:
             if ltp <= target:
-                pnl = round(t["entry"] - target, 2)
-                _live_exit(t, "target")
-                close_trade(tid, target, "target", closed_by="system")
-                logger.info("AUTO-EXIT #%d TARGET hit at %.2f (LTP %.2f)", tid, target, ltp)
-                notify.trade_closed(tid, target, "target", pnl)
-                closed = True
+                close_reason, close_price = "target", target
             elif ltp >= stop_loss:
-                pnl = round(t["entry"] - stop_loss, 2)
-                _live_exit(t, "stoploss")
-                close_trade(tid, stop_loss, "stoploss", closed_by="system")
-                logger.info("AUTO-EXIT #%d STOPLOSS hit at %.2f (LTP %.2f)", tid, stop_loss, ltp)
-                notify.trade_closed(tid, stop_loss, "stoploss", pnl)
+                close_reason, close_price = "stoploss", stop_loss
+
+        # ── 2. Options trailing profit lock ──────────────────────────────
+        if not close_reason and trail_pct > 0 and entry_premium > 0 and current_premium:
+            gain_pct = (current_premium - entry_premium) / entry_premium * 100
+            if gain_pct >= trail_pct:
+                opts_pnl = _calc_options_pnl(entry_premium, current_premium, lot_size)
+                logger.info(
+                    "OPTIONS TRAIL EXIT #%d — premium %.2f→%.2f (+%.1f%%) options P&L ₹%.0f",
+                    tid, entry_premium, current_premium, gain_pct, opts_pnl,
+                )
+                notify.options_trail_exit(tid, entry_premium, current_premium, gain_pct, opts_pnl)
+                close_reason, close_price = "options_trail", ltp
                 closed = True
+
+        # ── 3. Time exit ─────────────────────────────────────────────────
+        if not close_reason and time_exit_hr > 0 and now_hour >= time_exit_hr and now_minute == 0:
+            opts_pnl = _calc_options_pnl(entry_premium, current_premium, lot_size) \
+                       if (entry_premium > 0 and current_premium) else None
+            logger.info(
+                "TIME EXIT #%d at %02d:00 — index %.2f, options P&L %s",
+                tid, time_exit_hr, ltp,
+                f"₹{opts_pnl:+.0f}" if opts_pnl is not None else "unknown",
+            )
+            notify.time_exit(tid, time_exit_hr, opts_pnl)
+            close_reason, close_price = "time_exit", ltp
+            closed = True
+
+        # ── Execute close ─────────────────────────────────────────────────
+        if close_reason and not closed:
+            # index-based exit (target or stoploss)
+            pnl = round(
+                (close_price - entry) if zone_class == "demand" else (entry - close_price), 2
+            )
+            opts_pnl = _calc_options_pnl(entry_premium, current_premium, lot_size) \
+                       if (entry_premium > 0 and current_premium) else None
+            _live_exit(t, close_reason)
+            close_trade(tid, close_price, close_reason, closed_by="system")
+            logger.info(
+                "AUTO-EXIT #%d %s at %.2f (LTP %.2f) | options P&L %s",
+                tid, close_reason.upper(), close_price, ltp,
+                f"₹{opts_pnl:+.0f}" if opts_pnl is not None else "n/a",
+            )
+            notify.trade_closed(tid, close_price, close_reason, pnl, options_pnl=opts_pnl)
+            closed = True
+        elif close_reason and closed:
+            # options trail or time exit — use current ltp as index close price
+            pnl = round(
+                (ltp - entry) if zone_class == "demand" else (entry - ltp), 2
+            )
+            _live_exit(t, close_reason)
+            close_trade(tid, ltp, close_reason, closed_by="system")
 
         if closed:
             try:
@@ -525,7 +593,7 @@ def end_of_day():
             ltp = None
         for row in open_trades:
             t = dict(row)
-            exit_price = ltp or t["entry"]   # fallback to entry if LTP unavailable
+            exit_price = ltp or t["entry"]
             _live_exit(t, "eod")
             close_trade(t["id"], exit_price, "eod", closed_by="eod")
             logger.info("EOD close #%d at %.2f", t["id"], exit_price)
@@ -540,8 +608,24 @@ def end_of_day():
     wins   = sum(1 for t in closed if t["result"] == "win")
     losses = sum(1 for t in closed if t["result"] == "loss")
     pnl    = daily_pnl()
-    logger.info("Daily P&L: %.2f pts", pnl)
-    notify.eod_summary(trades=len(closed), wins=wins, losses=losses, total_pnl=pnl)
+
+    # Compute real options P&L from stored fill prices
+    total_options_pnl = None
+    opts_trades = [
+        t for t in closed
+        if t.get("options_entry_price") and t.get("options_exit_price")
+    ]
+    if opts_trades:
+        total_options_pnl = sum(
+            (t["options_exit_price"] - t["options_entry_price"]) * (t.get("options_lot_size") or config.NIFTY_LOT_SIZE)
+            for t in opts_trades
+        )
+        total_options_pnl = round(total_options_pnl, 2)
+        logger.info("Real options P&L today: ₹%.2f across %d trade(s)", total_options_pnl, len(opts_trades))
+
+    logger.info("Daily Index P&L: %.2f pts", pnl)
+    notify.eod_summary(trades=len(closed), wins=wins, losses=losses,
+                       total_pnl=pnl, total_options_pnl=total_options_pnl)
 
 
 def _backup_job():

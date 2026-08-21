@@ -168,7 +168,6 @@ def _handle_callback(cb: dict, token: str):
                         from brokers.kite_adapter import KiteAdapter
                         from journal.db import update_signal_exit_order
                         _ka = KiteAdapter()
-                        # BUG 1 fix: use stored lot size from entry, not live get_lot_size()
                         qty = _match.get("options_lot_size") or 0
                         if not qty:
                             qty = _ka.get_lot_size()
@@ -177,9 +176,13 @@ def _handle_callback(cb: dict, token: str):
                         logger.info("Live exit order placed: SELL %s ×%d → #%s", opts_sym, qty, _sell_oid)
                         time.sleep(3)
                         _fill = _ka.get_order_fill_price(_sell_oid)
+                        opts_pnl = None
                         if _fill > 0:
                             update_signal_exit_order(_tid, _sell_oid, _fill)
-                        notify.trade_closed(_tid, _ltp, "manual", _pnl)
+                            entry_prem = _match.get("options_entry_price") or 0
+                            if entry_prem > 0:
+                                opts_pnl = round((_fill - entry_prem) * qty, 2)
+                        notify.trade_closed(_tid, _ltp, "manual", _pnl, options_pnl=opts_pnl)
                     except Exception as ex:
                         notify._send(f"⚠️ Exit order FAILED for {opts_sym}: {ex}\nClose manually on Kite!")
                         logger.error("Live exit order failed: %s", ex)

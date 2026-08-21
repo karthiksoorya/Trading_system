@@ -108,7 +108,28 @@ def breakeven_applied(signal_id: int, entry: float):
     )
 
 
-def trade_closed(signal_id: int, exit_price: float, reason: str, pnl: float):
+def options_trail_exit(signal_id: int, entry_premium: float, current_premium: float,
+                       gain_pct: float, options_pnl: float):
+    """Fired when options premium has gained >= OPTIONS_TRAIL_PCT from entry."""
+    _send(
+        f"📈 <b>Trade #{signal_id} — Options Profit Lock</b>\n"
+        f"Premium: ₹{entry_premium:.2f} → ₹{current_premium:.2f} (+{gain_pct:.1f}%)\n"
+        f"Options P&L: ₹{options_pnl:+.0f}\n"
+        f"Exiting now to protect gains before theta erodes premium."
+    )
+
+
+def time_exit(signal_id: int, hour: int, options_pnl: float | None):
+    """Fired when TIME_EXIT_HOUR is reached and trade is still open."""
+    pnl_str = f" | Options P&L: ₹{options_pnl:+.0f}" if options_pnl is not None else ""
+    _send(
+        f"⏰ <b>Trade #{signal_id} — Time Exit ({hour:02d}:00)</b>\n"
+        f"Index target not reached — closing to avoid afternoon theta decay.{pnl_str}"
+    )
+
+
+def trade_closed(signal_id: int, exit_price: float, reason: str, pnl: float,
+                 options_pnl: float | None = None):
     if reason == "target":
         emoji = "🎯"
         label = "TARGET HIT"
@@ -123,9 +144,12 @@ def trade_closed(signal_id: int, exit_price: float, reason: str, pnl: float):
         label = "MANUAL CLOSE"
 
     pnl_str = f"+{pnl:.2f}" if pnl >= 0 else f"{pnl:.2f}"
+    opts_str = ""
+    if options_pnl is not None:
+        opts_str = f"\nOptions P&L: ₹{options_pnl:+.0f}"
     _send(
         f"{emoji} <b>Trade #{signal_id} Closed — {label}</b>\n"
-        f"Exit: {exit_price:.2f} | P&L: {pnl_str} pts"
+        f"Exit: {exit_price:.2f} | Index P&L: {pnl_str} pts{opts_str}"
     )
 
 
@@ -140,11 +164,16 @@ def backup_result(success: bool, message: str):
         _send(f"❌ <b>Backup Failed</b>\n{message}")
 
 
-def eod_summary(trades: int, wins: int, losses: int, total_pnl: float):
+def eod_summary(trades: int, wins: int, losses: int, total_pnl: float,
+                total_options_pnl: float | None = None):
     pnl_str = f"+{total_pnl:.2f}" if total_pnl >= 0 else f"{total_pnl:.2f}"
     emoji = "📈" if total_pnl >= 0 else "📉"
+    opts_line = ""
+    if total_options_pnl is not None:
+        opts_emoji = "✅" if total_options_pnl >= 0 else "❌"
+        opts_line = f"\n{opts_emoji} Options P&L: ₹{total_options_pnl:+.0f}"
     _send(
         f"{emoji} <b>EOD Summary</b>\n"
         f"Trades: {trades} | Wins: {wins} | Losses: {losses}\n"
-        f"Net P&L: {pnl_str} pts"
+        f"Net Index P&L: {pnl_str} pts{opts_line}"
     )
