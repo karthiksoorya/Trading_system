@@ -40,7 +40,7 @@ class Signal:
             "entry":              self.entry,
             "stop_loss":          self.stop_loss,
             "intraday_target":    self.intraday_target,
-            "overnight_target":   self.overnight_target,
+            "overnight_target":   self.overnight_target,   # informational only — engine always closes intraday
             "entry_type":         self.entry_type,
             "confluence_count":   self.confluence.count,
             "confluence_tfs":     self.confluence.label(),
@@ -54,14 +54,19 @@ def generate_signal(
     prev_candles: list[Candle],
     confluence: Optional[ConfluenceResult] = None,
     overnight_target_multiplier: float = 3.0,
+    opposing_zones: Optional[list[Zone]] = None,
 ) -> Optional[Signal]:
     """
     Build a Signal for a zone.
     Returns None if zone is invalid or booster score < MIN_BOOSTER_SCORE.
 
     Entry logic (Type 1 — limit at proximal):
-      Demand: entry = proximal, SL = distal, target = entry + 2× risk
-      Supply: entry = proximal, SL = distal, target = entry − 2× risk
+      Demand: entry = proximal, SL = distal - buffer, target = entry + 2× risk
+      Supply: entry = proximal, SL = distal + buffer, target = entry − 2× risk
+
+    FIX D: if opposing_zones are supplied, intraday_target is capped just below
+    (demand) or above (supply) the nearest opposing zone proximal that sits
+    between entry and the 2× target. Avoids setting targets inside resistance.
     """
     if not zone.is_valid:
         return None
@@ -77,11 +82,37 @@ def generate_signal(
         return None
 
     if zone.zone_class == "demand":
-        intraday_target  = entry + 2 * risk
+        raw_target       = entry + 2 * risk
         overnight_target = entry + overnight_target_multiplier * risk
+        # FIX D: cap target at nearest valid supply zone proximal between entry and raw_target
+        if opposing_zones:
+            obstacles = [
+                z.proximal for z in opposing_zones
+                if z.zone_class == "supply" and z.is_valid
+                and entry < z.proximal < raw_target
+            ]
+            if obstacles:
+                intraday_target = min(obstacles) - 2   # 2 pts buffer below resistance
+            else:
+                intraday_target = raw_target
+        else:
+            intraday_target = raw_target
     else:
-        intraday_target  = entry - 2 * risk
+        raw_target       = entry - 2 * risk
         overnight_target = entry - overnight_target_multiplier * risk
+        # FIX D: cap target at nearest valid demand zone proximal between entry and raw_target
+        if opposing_zones:
+            obstacles = [
+                z.proximal for z in opposing_zones
+                if z.zone_class == "demand" and z.is_valid
+                and raw_target < z.proximal < entry
+            ]
+            if obstacles:
+                intraday_target = max(obstacles) + 2   # 2 pts buffer above support
+            else:
+                intraday_target = raw_target
+        else:
+            intraday_target = raw_target
 
     boosters = score_zone(
         zone=zone,
@@ -113,7 +144,14 @@ def generate_signal(
 
 
 def _decide_entry_type(score: float) -> int:
-    """Score 10 → Type 1 | Score 8–9 → Type 2 | < 8 → no trade."""
+    """
+    Score 10    → Type 1 (strongest — all boosters near max)
+    Score 8–9   → Type 2 (good setup)
+    Score < 8   → Type 3 (below threshold — only reached if MIN_BOOSTER_SCORE
+                  was lowered below 8 via dashboard; treat as low-confidence)
+    FIX C: overnight_target is informational only — the engine always closes
+    intraday at 15:20. No code path switches to overnight_target automatically.
+    """
     if score >= 10: return 1
     if score >= 8:  return 2
     return 3

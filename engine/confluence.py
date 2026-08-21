@@ -38,16 +38,24 @@ class ConfluenceResult:
 
 def _zones_overlap(entry_zone: Zone, reference_zone: Zone) -> bool:
     """
-    True if entry_zone's proximal price falls inside reference_zone's band,
+    True if the entry zone's full price band overlaps with the reference zone's band,
     and both zones are the same class (demand/supply).
+
+    FIX E: previously only checked if entry_zone.proximal fell inside the reference band.
+    That missed cases where the entry zone is wider than the reference zone, and
+    incorrectly confirmed confluence when only the proximal tip touched the reference.
+    Full band overlap is the correct check for genuine price-cluster confluence.
     """
     if entry_zone.zone_class != reference_zone.zone_class:
         return False
     if not reference_zone.is_valid:
         return False
-    low  = min(reference_zone.proximal, reference_zone.distal)
-    high = max(reference_zone.proximal, reference_zone.distal)
-    return low <= entry_zone.proximal <= high
+    ref_low   = min(reference_zone.proximal, reference_zone.distal)
+    ref_high  = max(reference_zone.proximal, reference_zone.distal)
+    entry_low  = min(entry_zone.proximal, entry_zone.distal)
+    entry_high = max(entry_zone.proximal, entry_zone.distal)
+    # Overlap exists when the bands intersect (not just touch at a single point)
+    return entry_low <= ref_high and entry_high >= ref_low
 
 
 def check_confluence(

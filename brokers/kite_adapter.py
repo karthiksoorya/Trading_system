@@ -200,8 +200,11 @@ class KiteAdapter(BrokerBase):
         # Next Tuesday expiry (NSE changed Nifty weekly expiry from Thursday to Tuesday)
         today = date.today()
         days_ahead = (1 - today.weekday()) % 7          # 1 = Tuesday
-        if days_ahead == 0:
-            days_ahead = 7   # Never trade same-day expiry — extreme gamma risk
+        # FIX B: skip expiries within 2 calendar days — extreme gamma/theta risk.
+        # Previously only same-day (days_ahead==0) was skipped, but a contract
+        # expiring tomorrow is nearly as bad (wide spreads, rapid time decay).
+        if days_ahead <= 1:
+            days_ahead += 7   # jump to the following week's Tuesday
         expiry = today + timedelta(days=days_ahead)
 
         instruments = self._get_instruments("NFO")

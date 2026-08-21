@@ -21,8 +21,13 @@ BROKER = "kite"    # "kite" | "upstox"
 MODE   = "paper"   # "paper" | "live"
 
 # ── Capital & Risk (S.E.T.S) ───────────────────────────────────────────────
-CAPITAL              = 10_000   # ₹
-MAX_RISK_PCT         = 0.01     # 1% of capital per day → ₹100
+# FIX A: Updated to realistic capital for Nifty options trading.
+# One ATM weekly lot costs ~₹3,000–₹8,000 in premium. ₹10,000 was too small
+# for meaningful position sizing — risk_per_trade was ₹25 (sub-lot).
+# In live mode the system always trades exactly 1 lot; CAPITAL drives the
+# daily loss limit and the paper-mode position_size display only.
+CAPITAL              = 1_00_000  # ₹1,00,000 (1 lakh) — realistic for 1-lot Nifty options
+MAX_RISK_PCT         = 0.01      # 1% of capital per day → ₹1,000
 MAX_TRADES_PER_DAY   = 4
 MIN_BOOSTER_SCORE    = 8        # Score < 8 → no trade
 MIN_CONFLUENCE       = 1        # minimum TFs in agreement to generate signal
@@ -32,9 +37,14 @@ NIFTY_LOT_SIZE       = 65       # Nifty 50 lot size — revised by NSE effective
 NIFTY_SYMBOL = "NSE:NIFTY 50"
 VIX_SYMBOL   = "NSE:INDIA VIX"
 
+# ── VIX Filter ─────────────────────────────────────────────────────────────
+# FIX H: Skip signals when India VIX is above this threshold.
+# High VIX → inflated option premiums → immediate adverse theta/delta impact.
+VIX_MAX      = 20.0   # skip new entries when VIX > 20
+
 # ── Session Timings ────────────────────────────────────────────────────────
 MARKET_OPEN  = "09:15"
-SCAN_START   = "10:05"   # wait till 10 AM before any action
+SCAN_START   = "10:15"   # FIX G: moved from 10:05 — avoids unreliable opening volatility zones
 MARKET_CLOSE = "15:30"
 
 # ── Multi-Timeframe Config ─────────────────────────────────────────────────

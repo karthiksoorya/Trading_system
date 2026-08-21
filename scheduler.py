@@ -102,13 +102,34 @@ def _scan_core():
         logger.info("Max trades reached for today (%d).", config.MAX_TRADES_PER_DAY)
         return
 
-    if daily_pnl() <= -config.MAX_DAILY_LOSS:
-        logger.warning("Daily loss limit hit. No more trades today.")
+    # FIX F: use live MAX_DAILY_LOSS from settings, not stale module-level value
+    _s_early = config.load_settings()
+    _capital         = _s_early.get("CAPITAL",      config.CAPITAL)
+    _max_risk_pct    = _s_early.get("MAX_RISK_PCT",  config.MAX_RISK_PCT)
+    _max_daily_loss  = _capital * _max_risk_pct
+
+    if daily_pnl() <= -_max_daily_loss:
+        logger.warning("Daily loss limit hit (₹%.0f). No more trades today.", _max_daily_loss)
         return
 
     logger.info("Scanning %s ...", config.NIFTY_SYMBOL)
     ltp = broker.get_ltp(config.NIFTY_SYMBOL)
     logger.info("LTP: %.2f", ltp)
+
+    # FIX H: VIX filter — skip all new entries when India VIX is elevated
+    _vix_max = _s_early.get("VIX_MAX", config.VIX_MAX)
+    try:
+        vix = broker.get_ltp(config.VIX_SYMBOL)
+        logger.info("India VIX: %.2f (limit %.1f)", vix, _vix_max)
+        if vix > _vix_max:
+            logger.warning(
+                "India VIX %.2f > %.1f — skipping scan. "
+                "High VIX inflates option premiums and increases risk.",
+                vix, _vix_max,
+            )
+            return
+    except Exception as _vix_err:
+        logger.debug("VIX fetch failed — proceeding without filter: %s", _vix_err)
 
     # Active filters — read settings ONCE per scan so all decisions use consistent values
     # BUG 13 fix: previously load_settings() was called 3+ times during a single scan,
@@ -229,11 +250,17 @@ def _scan_core():
 
             confluence = check_confluence(zone, higher_tf_zones)
 
+            # FIX D: collect all valid zones of the opposing class from the entry TF
+            # so generate_signal can cap the target at the nearest resistance/support
+            opposing_class = "supply" if zone.zone_class == "demand" else "demand"
+            opposing_zones = [z for z in zones if z.zone_class == opposing_class and z.is_valid]
+
             signal = generate_signal(
                 zone=zone,
                 ltp=ltp,
                 prev_candles=candles[-10:],
                 confluence=confluence,
+                opposing_zones=opposing_zones,
             )
             if signal is None:
                 continue
