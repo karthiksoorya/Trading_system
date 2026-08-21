@@ -1,5 +1,5 @@
 Nifty Trading System — TODO
-Last updated: June 2026
+Last updated: August 21, 2026
 ============================================================
 
 ✅ DONE
@@ -25,65 +25,132 @@ Last updated: June 2026
 [x] Holiday detection (15 min frozen LTP → auto-stop)
 [x] Stop Engine flag via settings.json (works under systemd)
 [x] Approval gate fix (status='closed' authoritative)
-[x] VPS deployment (running at 13.201.210.4:8501)
+[x] VPS deployment (running on AWS Lightsail)
 [x] .env for credentials (gitignored)
 [x] Daily CSV export with date stamp
 [x] Performance tab (cumulative P&L, daily chart, zone/TF breakdown)
-[x] Project context doc (docs/PROJECT_CONTEXT.md)
+[x] Breakeven SL (move SL to entry at 1:1 R:R) — Aug 2026
+[x] Full bug fix pass — 22 software bugs fixed — Aug 2026 (see FIXES.md)
+[x] Trading logic fixes — 8 issues fixed — Aug 2026 (see FIXES.md)
+[x] VIX filter — skip scan when India VIX > 20 — Aug 2026
+[x] Opposing zone target cap — don't set target inside resistance — Aug 2026
+[x] SCAN_START moved to 10:15 — avoid opening volatility zones — Aug 2026
+[x] Expiry buffer — skip contracts within 2 days of expiry — Aug 2026
+[x] Time exit at 13:00 — close if target not hit by afternoon — Aug 2026
+[x] Options P&L tracking — real rupee P&L in EOD summary and close msgs — Aug 2026
+[x] Options trailing stop (30%) — exits when premium up 30% — Aug 2026
+     NOTE: Review after 1 week — may replace with index 75% partial exit
 
 
-⏳ PENDING — HIGH PRIORITY
+⏳ PENDING — HIGH PRIORITY (build after 1 week of live data)
 ------------------------------------------------------------
-[ ] VPS systemd auto-start
-      → Engine should restart automatically if VPS reboots
-      → Create /etc/systemd/system/nifty-engine.service
-      → Also a separate service for streamlit
+[ ] Replace options trail with index 75% partial exit
+      → If index has moved 75% toward target AND time > 11:30, exit
+      → Keeps all logic index-based (not chasing options price)
+      → Example: entry 24201, target 24266 → exit at 24250 after 11:30
+      → File: engine/signals.py + scheduler.py monitor_open_trades
 
-[ ] Streamlit auto-refresh
-      → Page should refresh every 30–60s without manual click
-      → Use streamlit-autorefresh package or st.fragment run_every
+[ ] Curve analysis — HTF position filter
+      → Biggest gap in strategy. Zone fires but no check if Nifty is
+         at top/bottom of its daily/weekly range.
+      → A demand zone at the TOP of the daily curve is weak.
+      → A supply zone at the BOTTOM of the daily range is weak.
+      → Implement: fetch 60min or daily candles, check zone position
+         relative to recent swing high/low
+      → File: engine/signals.py or new engine/curve.py
 
-[ ] Kite daily token via Telegram
-      → Bot sends login link to Telegram every morning at 8:30 AM
-      → You click, paste redirect URL back to bot
-      → Bot saves token automatically (no need to open dashboard)
+[ ] HPA levels — High Probability Areas
+      → Previous Day High (PDH), Previous Day Low (PDL)
+      → Opening High (CDH), Opening Low (CDL)
+      → Big Round Numbers (24000, 24100, 24200, etc.)
+      → If target sits just beyond a round number, it rarely hits
+      → Check: is there an HPA between entry and target? If yes, cap target there.
+      → File: engine/signals.py (extend opposing zone cap)
+
+[ ] Approval delay tracking
+      → Log approved_time in DB (new column)
+      → If delay > 5 min from time_signal, flag in Telegram and dashboard
+      → You are consistently entering 3-5 min late — this tightens R:R
+      → File: journal/db.py (add approved_at column), telegram_handler.py
 
 
 ⏳ PENDING — MEDIUM PRIORITY
 ------------------------------------------------------------
-[ ] Kite login automation (deferred — not primary)
-      → Playwright + pyotp to fully automate daily token
-      → Requires TOTP secret key from Zerodha 2FA setup
-      → Only if TOTP (Google Authenticator) is used, not SMS OTP
+[ ] First Trouble Area (FTA) check
+      → Before generating a signal, check: is there a valid zone between
+         entry and target that price must pass through?
+      → If yes, the target is harder to reach — reduce confidence or skip
+      → The opposing zone cap (Fix D) is a start but FTA is more nuanced
+      → File: engine/signals.py generate_signal()
 
-[ ] Live order placement
-      → place_order() in KiteAdapter
-      → CE for demand zones, PE for supply zones
-      → Strike price selection logic (ATM or based on entry)
-      → Gate behind config.MODE == "live"
-      → Only after 20+ paper trades validated
+[ ] Opening bias filter
+      → If market opens with gap down > 0.3% vs previous close → bearish bias
+      → Skip demand zone signals on bearish-bias days
+      → Skip supply zone signals on bullish-bias days
+      → File: scheduler.py _scan_core()
+
+[ ] Multi-day zone tracking
+      → Zones that formed yesterday but weren't approached are often stronger
+      → Currently scans days=5 of history but doesn't weight older zones lower
+      → Add: zone age scoring — fresher formation = higher weight
+      → File: engine/boosters.py score_freshness()
+
+[ ] Kite daily token via Telegram
+      → Bot sends login link to Telegram every morning at 8:30 AM
+      → You click, paste redirect URL back to bot
+      → Bot saves token automatically
+
+[ ] VPS systemd auto-start
+      → Engine should restart automatically if VPS reboots
+      → Create /etc/systemd/system/nifty-engine.service
 
 
 ⏳ PENDING — LOW PRIORITY
 ------------------------------------------------------------
-[ ] Bank Nifty support
+[ ] Bank Nifty as second instrument
       → Add BANKNIFTY_SYMBOL to config
+      → Friday expiry (check current NSE schedule)
       → Same zone/signal logic applies
+
+[ ] Trailing SL (let winners run)
+      → After breakeven, instead of fixed target, trail SL by N points
+      → Captures extended moves beyond 2× R:R
+
+[ ] Position verification before SELL
+      → Before placing exit order, verify position exists on Kite
+      → Prevents naked short if manually closed outside system
+      → File: brokers/kite_adapter.py + scheduler.py _live_exit()
 
 [ ] Upstox adapter
       → Implement when Upstox API is enabled on account
 
-[ ] Mobile-optimised UI
-      → Current Streamlit works on phone but not mobile-first
-      → Future: React UI (Phase 2 from master doc)
 
-
-🎯 VALIDATION CHECKLIST (before going live)
+📊 THIS WEEK — OBSERVE AND RECORD (Aug 21–28, 2026)
 ------------------------------------------------------------
-[ ] 20+ paper trades logged
-[ ] Win rate > 50%
-[ ] Avg P&L positive
-[ ] System detects zones correctly (verify 5+ manually)
-[ ] No crashes for 5 consecutive trading days
-      → Check in Performance tab
+Don't change code. Gather data to answer:
+
+[ ] At what time does options premium peak vs when index hits its high?
+[ ] How much does theta take per hour after 12:00? (record CE price at 12:00, 13:00, 14:00)
+[ ] Is 13:00 the right time cutoff or should it be 12:30?
+[ ] Is 30% options trail correct or does it exit too early / too late?
+[ ] Which zone types (DBR/RBR/RBD/DBD) fired and which actually worked?
+[ ] What was VIX at each signal entry? Is 20 the right threshold?
+[ ] How many minutes between signal and approval? Is late entry hurting?
+[ ] Does the 60min trend filter correctly block bad trades?
+
+After each trade: write 2 lines — what index did, what options did.
+This becomes training data for better rules.
+
+
+🎯 VALIDATION CHECKLIST
+------------------------------------------------------------
+[x] System running live on VPS
+[x] Telegram approve/reject/close working
+[x] Auto-exit on target and SL working
+[x] Breakeven SL working
+[x] EOD auto-close working
+[ ] 10+ live trades completed — check autolearn data
+[ ] Win rate > 45% over 20+ trades
+[ ] Options P&L positive over 1 week
+[ ] No system crashes for 5 consecutive trading days
 ============================================================
