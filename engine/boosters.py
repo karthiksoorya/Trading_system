@@ -38,19 +38,30 @@ def score_freshness(zone: Zone) -> float:
     return 0.0
 
 
-def score_strength(leg_out: Candle, prev_candles: list[Candle]) -> float:
+def score_strength(leg_out: Candle, prev_candles: list[Candle], zone: "Zone | None" = None) -> float:
     """
     Gap away from base OR explosive move (body >> avg) = 2
     Strong (exciting candle, no gap)                   = 1
     Weak                                               = 0
 
-    A gap is detected when leg_out open != previous candle close.
-    Explosive is body > 2× average body of prev_candles.
+    BUG 14 fix: gap is detected by comparing leg_out.open against the last base
+    candle of the zone (zone.base_candles[-1]). Previously it compared against
+    prev_candles[-1] which is the most recent live candle — almost always non-zero,
+    giving every historical leg_out a spurious gap score of 2.0.
+
+    Falls back to prev_candles[-1] if zone or base_candles are unavailable.
+    Explosive is body > 2× average body of prev_candles (unchanged).
     """
     if not prev_candles:
         return 1.0  # default to strong if no context
 
-    gap = abs(leg_out.open - prev_candles[-1].close) > 0
+    # Use the candle immediately before leg_out (last base candle) for gap detection
+    if zone is not None and zone.base_candles:
+        candle_before_legout = zone.base_candles[-1]
+    else:
+        candle_before_legout = prev_candles[-1]  # fallback (old behaviour)
+
+    gap = abs(leg_out.open - candle_before_legout.close) > 0
 
     avg_body = sum(c.body for c in prev_candles) / len(prev_candles)
     explosive = leg_out.body > 2 * avg_body if avg_body > 0 else False
@@ -115,7 +126,7 @@ def score_zone(
 ) -> BoosterResult:
     return BoosterResult(
         freshness=  score_freshness(zone),
-        strength=   score_strength(zone.leg_out, prev_candles),
+        strength=   score_strength(zone.leg_out, prev_candles, zone=zone),
         time_score= score_time(zone),
         rr_score=   score_rr(entry, stop_loss, intraday_target, overnight_target),
     )

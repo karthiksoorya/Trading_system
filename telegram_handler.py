@@ -70,10 +70,11 @@ def _handle_callback(cb: dict, token: str):
             if get_open_trades():
                 answer = "⚠️ Already have an open trade — reject it first."
             else:
-                approve_signal(sig_id)
-                logger.info("Telegram approved signal #%d", sig_id)
+                # BUG 16 fix: don't approve before order is placed.
+                # In paper mode approve immediately; in live mode approve only after
+                # the order is successfully placed, to avoid a race window where
+                # monitor_open_trades sees an 'approved' trade with no real entry.
                 row = get_signal(sig_id)
-                # ── Live: place real options entry order ──────────────────
                 order_note = ""
                 _order_failed = False
                 if config.load_settings().get("MODE") == "live" and row:
@@ -81,12 +82,18 @@ def _handle_callback(cb: dict, token: str):
                         from brokers.kite_adapter import KiteAdapter
                         _k = KiteAdapter()
                         if not _k._token_loaded:
+                            # No token — approve anyway (paper-like behaviour) with a warning
+                            approve_signal(sig_id)
+                            logger.info("Telegram approved signal #%d (no token)", sig_id)
                             order_note = "\n⚠️ No Kite token — NO real order placed. Save token in dashboard first."
                         else:
                             _k.validate_entry(row["entry"], row["stop_loss"], row["zone_class"])
                             _contract = _k.get_options_contract(row["entry"], row["zone_class"])
                             _qty      = _contract["lot_size"]
                             _oid      = _k.place_options_order(_contract["symbol"], "BUY", _qty)
+                            # Order confirmed — now safe to approve
+                            approve_signal(sig_id)
+                            logger.info("Telegram approved signal #%d", sig_id)
                             update_signal_order(sig_id, _oid, _contract["symbol"], _qty)
                             order_note = f"\n🔴 LIVE ORDER: BUY {_contract['symbol']} ×{_qty} | Order #{_oid}"
                             logger.info("Live entry order placed: %s order #%s", _contract["symbol"], _oid)
@@ -110,6 +117,10 @@ def _handle_callback(cb: dict, token: str):
                         answer = f"❌ Signal #{sig_id} order FAILED — auto-rejected. Approve next signal."
                         notify._send(f"❌ Order FAILED for signal #{sig_id}:\n{_oe}\nSignal auto-rejected — approve the next one.")
                         _order_failed = True
+                else:
+                    # Paper mode — approve immediately, no order to place
+                    approve_signal(sig_id)
+                    logger.info("Telegram approved signal #%d (paper)", sig_id)
                 if not _order_failed:
                     answer = f"✅ Signal #{sig_id} approved!{order_note}"
                     if row:
