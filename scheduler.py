@@ -348,11 +348,15 @@ def _scan_core():
                         _strike_display, _opt_type, _delta, vix or 0, _dte)
 
             # _s and _auto_first already read at top of scan (BUG 13 fix)
+            _fully_auto    = _s.get("FULLY_AUTOMATED", False)
             _no_open_trade = not get_open_trades()
+            _do_auto       = _no_open_trade and (
+                _fully_auto or (_auto_first and trades_today() == 0)
+            )
 
-            if _auto_first and trades_today() == 0 and _no_open_trade:
-                # ── Auto-execute the first trade of the day ───────────────
-                logger.info("AUTO-TRADE: first trade of day — attempting signal #%d", sig_id)
+            if _do_auto:
+                _auto_label = "FULLY-AUTO" if _fully_auto else "AUTO-FIRST"
+                logger.info("%s: attempting signal #%d", _auto_label, sig_id)
                 _auto_ok = False
                 if _s.get("MODE") == "live":
                     try:

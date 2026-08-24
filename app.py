@@ -638,6 +638,27 @@ with tab_engine:
     else:
         st.caption("Auto-trade OFF — every signal requires your approval via Telegram.")
 
+    st.divider()
+    st.subheader("Fully Automated Mode")
+    fully_auto = st.toggle(
+        "🚀 Auto-execute ALL signals (no manual approval)",
+        value=_current.get("FULLY_AUTOMATED", False),
+        help=(
+            "When ON: every qualifying signal is placed on Kite automatically — no Telegram approval needed. "
+            "All existing filters still apply (score, VIX, time-of-day, daily loss limit, max trades). "
+            "You will still receive Telegram notifications with an early exit button. "
+            "Use only when you have tested the system sufficiently in paper/semi-auto mode."
+        ),
+    )
+    if fully_auto:
+        st.warning(
+            "🚀 **Fully automated ON** — system will place ALL qualifying orders without asking you. "
+            "Ensure VIX filter, score threshold, and daily loss limit are set correctly before leaving this on.",
+            icon="⚠️",
+        )
+    else:
+        st.caption("Fully automated OFF — signals above require manual or first-trade auto only.")
+
     if st.button("💾 Save Settings"):
         if not scan_tfs:
             st.error("Select at least one timeframe.")
@@ -655,6 +676,7 @@ with tab_engine:
                 "MIN_CONFLUENCE":        min_conf,
                 "SCAN_WINDOW":           {"start": scan_start_time, "end": scan_end_time},
                 "AUTO_FIRST_TRADE":      auto_first,
+                "FULLY_AUTOMATED":       fully_auto,
             })
             st.success(
                 f"Saved — TF: {entry_tf} | Score ≥ {min_score} | "
