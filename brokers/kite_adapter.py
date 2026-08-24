@@ -192,10 +192,13 @@ class KiteAdapter(BrokerBase):
         self._get_instruments("NFO")
 
     def get_options_contract(self, ltp: float, direction: str) -> dict:
-        """Find ATM weekly Nifty options contract. direction='demand'→CE, 'supply'→PE."""
+        """Find 1-strike ITM weekly Nifty options contract. direction='demand'→CE, 'supply'→PE.
+        ITM (delta ~0.6) reduces IV crush vs ATM — option tracks index move more closely."""
         from datetime import date, timedelta, datetime as dt
         option_type = "CE" if direction == "demand" else "PE"
-        strike = round(ltp / 50) * 50
+        atm = round(ltp / 50) * 50
+        # 1 strike ITM: for CE go 50pts below ATM, for PE go 50pts above ATM
+        strike = (atm - 50) if option_type == "CE" else (atm + 50)
 
         # Next Tuesday expiry (NSE changed Nifty weekly expiry from Thursday to Tuesday)
         today = date.today()

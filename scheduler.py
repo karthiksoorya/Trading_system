@@ -13,6 +13,7 @@ Multi-timeframe confluence flow:
 """
 
 import logging
+import math
 import threading
 import time
 from datetime import date, datetime, timedelta
@@ -31,7 +32,7 @@ from engine.position_size import calculate as size_trade
 from journal.db import (init_db, log_signal, trades_today, daily_pnl, get_open_trades,
                         close_trade, zone_signaled_today, expire_old_pending,
                         approve_signal, update_signal_order, update_signal_entry_price,
-                        reject_signal, update_signal_sl)
+                        reject_signal)
 from journal.export import export_day
 import notify
 
@@ -46,6 +47,35 @@ broker = get_broker()
 
 # TFs in ascending order — lower index = lower timeframe
 _TF_ORDER = [config.TF_LOWER, config.TF_INTERMEDIATE, config.TF_HIGHER]
+
+# VIX direction tracking — baseline set on first scan of each trading day
+_vix_baseline: float = 0.0
+_vix_baseline_date: str = ""
+
+
+def _norm_cdf(x: float) -> float:
+    return (1.0 + math.erf(x / math.sqrt(2.0))) / 2.0
+
+
+def _bs_delta(spot: float, strike: float, days_to_expiry: int, vix: float, option_type: str) -> float:
+    """Black-Scholes delta. vix is India VIX value (e.g. 14.2). Returns rounded delta."""
+    T = max(days_to_expiry / 365.0, 1 / 365.0)
+    sigma = max(vix / 100.0, 0.01)
+    r = 0.07   # India 10yr risk-free rate ~7%
+    try:
+        d1 = (math.log(spot / strike) + (r + 0.5 * sigma ** 2) * T) / (sigma * math.sqrt(T))
+        return round(_norm_cdf(d1) if option_type == "CE" else _norm_cdf(d1) - 1.0, 2)
+    except Exception:
+        return 0.5
+
+
+def _days_to_next_expiry() -> int:
+    """Days until next Nifty weekly expiry (Tuesday), skipping if <= 1 day away."""
+    today = date.today()
+    days_ahead = (1 - today.weekday()) % 7
+    if days_ahead <= 1:
+        days_ahead += 7
+    return days_ahead
 
 
 def get_last_trading_day() -> date:
@@ -116,11 +146,22 @@ def _scan_core():
     ltp = broker.get_ltp(config.NIFTY_SYMBOL)
     logger.info("LTP: %.2f", ltp)
 
-    # FIX H: VIX filter — skip all new entries when India VIX is elevated
+    # VIX level + direction filter
     _vix_max = _s_early.get("VIX_MAX", config.VIX_MAX)
+    vix = None
+    vix_rising = False
     try:
+        global _vix_baseline, _vix_baseline_date
         vix = broker.get_ltp(config.VIX_SYMBOL)
-        logger.info("India VIX: %.2f (limit %.1f)", vix, _vix_max)
+        today_str = date.today().isoformat()
+        if _vix_baseline_date != today_str or _vix_baseline == 0.0:
+            _vix_baseline = vix
+            _vix_baseline_date = today_str
+            logger.info("India VIX baseline set: %.2f", vix)
+        vix_rising = vix > _vix_baseline * 1.02   # >2% above today's first reading
+        logger.info("India VIX: %.2f (open %.2f, limit %.1f) — %s",
+                    vix, _vix_baseline, _vix_max,
+                    "RISING ⚠️ CE signals blocked" if vix_rising else "stable")
         if vix > _vix_max:
             logger.warning(
                 "India VIX %.2f > %.1f — skipping scan. "
@@ -195,6 +236,19 @@ def _scan_core():
 
         for zone in zones:
             if zone.zone_class not in active_classes:
+                continue
+
+            # VIX direction filter: rising VIX = fear expanding = IV crush risk on CE
+            if zone.zone_class == "demand" and vix_rising:
+                logger.info(
+                    "[%s] Skipped — VIX rising (%.2f vs %.2f open) — IV crush risk on CE",
+                    tf, vix if vix else 0, _vix_baseline,
+                )
+                continue
+
+            # Time-of-day filter: CE signals only after 11:00 AM (morning IV not settled)
+            if zone.zone_class == "demand" and datetime.now().hour < 11:
+                logger.info("[%s] Skipped — CE before 11:00 AM, morning IV not settled", tf)
                 continue
 
             # Skip if this exact zone already signaled today
@@ -284,6 +338,15 @@ def _scan_core():
                 signal.entry, signal.stop_loss, signal.intraday_target,
             )
 
+            # Options context for Telegram — delta and VIX computed from data already in memory
+            _atm = round(signal.entry / 50) * 50
+            _opt_type = "CE" if zone.zone_class == "demand" else "PE"
+            _strike_display = (_atm - 50) if _opt_type == "CE" else (_atm + 50)
+            _dte   = _days_to_next_expiry()
+            _delta = _bs_delta(ltp, _strike_display, _dte, vix or 15.0, _opt_type)
+            logger.info("Options context: %d %s | delta %.2f | VIX %.1f | DTE %d",
+                        _strike_display, _opt_type, _delta, vix or 0, _dte)
+
             # _s and _auto_first already read at top of scan (BUG 13 fix)
             _no_open_trade = not get_open_trades()
 
@@ -337,6 +400,8 @@ def _scan_core():
                         entry=signal.entry, sl=signal.stop_loss,
                         target=signal.intraday_target, score=signal.boosters.total,
                         confluence=signal.confluence.label(),
+                        strike=_strike_display, opt_type=_opt_type,
+                        delta=_delta, vix=vix,
                     )
             else:
                 # ── Normal flow: send Telegram notification for manual approval ──
@@ -350,6 +415,8 @@ def _scan_core():
                     target=signal.intraday_target,
                     score=signal.boosters.total,
                     confluence=signal.confluence.label(),
+                    strike=_strike_display, opt_type=_opt_type,
+                    delta=_delta, vix=vix,
                 )
 
 
@@ -453,26 +520,6 @@ def monitor_open_trades():
 
         # ── Fetch live options premium ────────────────────────────────────
         current_premium = _get_options_ltp(opts_sym) if opts_sym else None
-
-        # ── Breakeven SL: once 1:1 R:R is reached, move SL to entry ─────────
-        risk = abs(entry - stop_loss)
-        breakeven_not_applied = abs(stop_loss - entry) > 0.5
-        breakeven_just_applied = False
-        if breakeven_not_applied:
-            one_to_one = (entry + risk) if zone_class == "demand" else (entry - risk)
-            hit_one_to_one = (
-                (zone_class == "demand" and ltp >= one_to_one) or
-                (zone_class == "supply" and ltp <= one_to_one)
-            )
-            if hit_one_to_one:
-                update_signal_sl(tid, entry)
-                stop_loss = entry
-                breakeven_just_applied = True
-                notify.breakeven_applied(tid, entry)
-                logger.info("BREAKEVEN SL applied for #%d — SL moved to entry %.2f", tid, entry)
-
-        if breakeven_just_applied:
-            continue
 
         closed = False
         close_reason = None

@@ -35,7 +35,9 @@ def _send(text: str, reply_markup: dict | None = None) -> int | None:
 
 def signal_detected(signal_id: int, zone_class: str, zone_type: str,
                     timeframe: str, entry: float, sl: float,
-                    target: float, score: float, confluence: str):
+                    target: float, score: float, confluence: str,
+                    strike: int = 0, opt_type: str = "",
+                    delta: float = 0.0, vix: float = 0.0):
     from datetime import datetime, date, timedelta
     emoji     = "🟢" if zone_class == "demand" else "🔴"
     direction = "LONG" if zone_class == "demand" else "SHORT"
@@ -48,11 +50,22 @@ def signal_detected(signal_id: int, zone_class: str, zone_type: str,
         next_expiry = today + timedelta(days=7)
         expiry_note = f"\n⚠️ <b>Expiry day</b> — order will use next week ({next_expiry.strftime('%d %b')}) contract"
 
+    # Options context line — delta and VIX help human judge IV environment before approving
+    options_note = ""
+    if strike and opt_type:
+        iv_warn = " ⚠️ High IV" if vix and vix > 15 else ""
+        vix_str = f"{vix:.1f}" if vix else "—"
+        options_note = (
+            f"\nStrike: <b>{strike} {opt_type}</b> | "
+            f"Delta: {delta:+.2f} | VIX: {vix_str}{iv_warn}"
+        )
+
     text = (
         f"{emoji} <b>Signal #{signal_id} — {direction}</b>  🕐 {now}\n"
         f"{zone_type} | {timeframe}\n"
         f"Entry: {entry:.2f} | SL: {sl:.2f} | TGT: {target:.2f}\n"
         f"Score: {score:.1f}/10 | {confluence}"
+        f"{options_note}"
         f"{expiry_note}"
     )
     keyboard = {
