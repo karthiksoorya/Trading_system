@@ -1474,6 +1474,82 @@ with tab_learning:
 
     st.divider()
 
+    # ── Trading Lessons from Live Sessions ───────────────────────────────
+    st.subheader("📚 Trading Lessons from Live Sessions")
+    st.caption("Key patterns and rules extracted from real trades. Updated after each live session.")
+
+    with st.expander("Aug 25, 2026 — ITM strike + 8 DTE: -₹29 options. PE IV crush confirmed.", expanded=True):
+        st.markdown("""
+**1 trade (signal 824): DBD supply, 3 TF confluence. +77.2 index pts. Options P&L: -₹29.**
+
+| What | Detail |
+|------|--------|
+| Strike | 24350 PE — 1 strike ITM (ATM was 24300) ✅ |
+| Expiry | Sep 2 (8 DTE — jumped past Aug 26 per 2-day rule) ✅ |
+| Options P&L | -₹29 vs -₹448 to -₹1,544 on Aug 24 — **98% improvement** |
+| Auto-expiry | 33 of 34 signals auto-expired — only highest quality (3 TF) approved |
+
+**Why -₹29 despite +77 index pts?**
+PE IV crush: Fear was already priced into the premium at entry (high IV at 09:59). When Nifty fell 77 pts, IV simultaneously collapsed as the feared move materialised. Delta gain ≈ IV loss → net flat.
+
+**Key rule:** PE IV crush happens when VIX is already elevated at entry AND the move happens fast. Fix: check IV Rank before approving — buy only when IV is historically cheap.
+
+**Comparison:**
+| Day | Strike | DTE | Options P&L |
+|-----|--------|-----|-------------|
+| Aug 24 | ATM CE | 1 day | -₹448 to -₹1,544 |
+| Aug 25 | 1-ITM PE | 8 days | **-₹29** |
+        """)
+
+    with st.expander("Aug 24, 2026 — Won points, lost money. CE IV crush + breakeven SL trap."):
+        st.markdown("""
+**4 trades. +210 index pts total. -₹1,884 options total.**
+
+| Trade | Index P&L | Options P&L | Why |
+|-------|-----------|-------------|-----|
+| 801 CE | +54.3 pts | -₹448 | IV crush on morning recovery |
+| 806 CE | 0 pts (breakeven SL) | **-₹1,544** | SL protected index, not options |
+| 809 CE | +78.8 pts | -₹97 | Less IV crush — ITM strike |
+| 810 PE | +77.2 pts | +₹205 | Afternoon reversal — IV expanded |
+
+**Critical lesson:** Breakeven SL = **false security**. When index returns to entry (0 pts loss), options have been decaying for the full duration. Trade 806: index said "breakeven", account said -₹1,544. Breakeven SL removed — time exit (13:00) and options trail (30%) replace it.
+
+**Pattern:**
+| Market | CE (calls) | PE (puts) |
+|--------|-----------|----------|
+| Strong uptrend | ✅ | ❌ |
+| Choppy/recovery | ❌ IV crush | ❌ |
+| Strong downtrend | ❌ | ✅ |
+| Reversal after rally | ❌ | ✅ IV expansion |
+        """)
+
+    with st.expander("Aug 21, 2026 — Theta decay lesson: held too long. -₹630 options, +33 index pts."):
+        st.markdown("""
+**1 trade (788). DBR demand CE. Entry 09:16, EOD close 15:20.**
+
+By 10:45 the option was +₹500. Index stalled. Theta bled premium all afternoon.
+EOD close: +33 index pts but CE decayed to -₹630.
+
+**Rule:** ATM CE held for 6 hours = theta erodes delta gains. Exit at 13:00 or when +30% options profit — never hold hoping index resumes.
+
+**Fix applied:** `OPTIONS_TRAIL_PCT=30`, `TIME_EXIT_HOUR=13` — both auto-exit without human involvement.
+        """)
+
+    with st.expander("Aug 20, 2026 — Don't panic-exit on options price. Watch index level only."):
+        st.markdown("""
+**3 trades. Trade 770 closed manually at +₹16. Correct hold would have been ~₹3,000.**
+
+- Supply zone: Nifty fell from 24226 to 24039 (-187 pts, 104 pts past target)
+- User panicked on options price fluctuation — closed manually at +₹16 instead of target
+- Trade 779 (same zone type, held 2+ hrs): +₹3,415
+
+**The rule: If Nifty has NOT crossed your SL level, the trade is still valid — regardless of options price.**
+
+Options premium fluctuates with IV, delta, bid-ask spread. Watching it live causes panic and premature exits. Index level is the only truth during a trade.
+        """)
+
+    st.divider()
+
     # ── Learning log ──────────────────────────────────────────────────────
     st.subheader("Learning Log")
     _log_file = config.BASE_DIR / "logs" / "autolearn.log"
