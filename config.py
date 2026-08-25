@@ -42,6 +42,13 @@ VIX_SYMBOL   = "NSE:INDIA VIX"
 # High VIX → inflated option premiums → immediate adverse theta/delta impact.
 VIX_MAX      = 20.0   # skip new entries when VIX > 20
 
+# ── IV Rank Filter ─────────────────────────────────────────────────────────
+# IV Rank = (current_vix - 52w_low) / (52w_high - 52w_low) × 100
+# Skip signals when IV is historically expensive — premium crush risk even on
+# correct direction. Aug 25 lesson: PE -₹29 despite +77 pts (IV priced in fear).
+# 0 = cheapest IV in 52w. 100 = most expensive. 60 = top-40% = skip.
+IV_RANK_MAX  = 60.0   # skip when IV Rank > 60% (set to 100 to disable)
+
 # ── Session Timings ────────────────────────────────────────────────────────
 MARKET_OPEN  = "09:15"
 SCAN_START   = "10:15"   # FIX G: moved from 10:05 — avoids unreliable opening volatility zones

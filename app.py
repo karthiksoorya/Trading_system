@@ -618,6 +618,28 @@ with tab_engine:
     st.caption("Set 09:15 → 15:25 to scan all day. Example: set 10:00 → 14:59 to skip 12:xx chop.")
 
     st.divider()
+    st.subheader("IV Rank Filter")
+    st.caption(
+        "IV Rank = where today's VIX sits within its 52-week range (0% = cheapest, 100% = most expensive). "
+        "High IV Rank means option premiums are historically rich — IV crush risk even when direction is right."
+    )
+    iv_rank_max = st.slider(
+        "Max IV Rank to allow signal (%)",
+        min_value=30, max_value=100,
+        value=int(_current.get("IV_RANK_MAX", 60)),
+        step=5,
+        help=(
+            "Signal is blocked when IV Rank exceeds this. "
+            "60 = skip when premium is in top 40% of 52-week range. "
+            "Set to 100 to disable the filter entirely."
+        ),
+    )
+    _iv_rank_cols = st.columns(3)
+    _iv_rank_cols[0].metric("🟢 Cheap IV", "≤ 30%", "Buy freely")
+    _iv_rank_cols[1].metric("🟡 Moderate IV", "31–60%", "Caution")
+    _iv_rank_cols[2].metric("🔴 Rich IV", "> 60%", "IV crush risk")
+
+    st.divider()
     st.subheader("Auto-Trade First Signal")
     auto_first = st.toggle(
         "🤖 Auto-execute first trade of the day",
@@ -675,6 +697,7 @@ with tab_engine:
                 "MIN_BOOSTER_SCORE":     min_score,
                 "MIN_CONFLUENCE":        min_conf,
                 "SCAN_WINDOW":           {"start": scan_start_time, "end": scan_end_time},
+                "IV_RANK_MAX":           iv_rank_max,
                 "AUTO_FIRST_TRADE":      auto_first,
                 "FULLY_AUTOMATED":       fully_auto,
             })

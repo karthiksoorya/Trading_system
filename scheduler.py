@@ -52,6 +52,39 @@ _TF_ORDER = [config.TF_LOWER, config.TF_INTERMEDIATE, config.TF_HIGHER]
 _vix_baseline: float = 0.0
 _vix_baseline_date: str = ""
 
+# IV Rank cache — refreshed once per day (365-day VIX fetch is slow, do it once)
+_iv_rank_cache: dict = {"rank": None, "date": ""}
+
+
+def _get_iv_rank() -> float | None:
+    """Compute India VIX IV Rank (0–100) using 52-week high/low. Cached daily.
+
+    IV Rank = (current_vix - 52w_low) / (52w_high - 52w_low) × 100
+    Low rank = cheap premium = safer to buy naked options.
+    High rank = expensive premium = IV crush risk even on correct direction.
+    Returns None if data unavailable (filter is skipped gracefully).
+    """
+    today_str = date.today().isoformat()
+    if _iv_rank_cache["date"] == today_str and _iv_rank_cache["rank"] is not None:
+        return _iv_rank_cache["rank"]
+    try:
+        candles = broker.get_historical(config.VIX_SYMBOL, "day", 365)
+        if len(candles) < 20:
+            logger.warning("IV Rank: too few VIX candles (%d) — skipping rank filter", len(candles))
+            return None
+        closes = [c.close for c in candles]
+        current = closes[-1]
+        hi = max(closes)
+        lo = min(closes)
+        rank = round((current - lo) / (hi - lo) * 100, 1) if hi != lo else 50.0
+        _iv_rank_cache["rank"] = rank
+        _iv_rank_cache["date"] = today_str
+        logger.info("IV Rank: %.1f%% (VIX %.2f, 52w range %.2f – %.2f)", rank, current, lo, hi)
+        return rank
+    except Exception as e:
+        logger.warning("IV Rank fetch failed — filter skipped: %s", e)
+        return None
+
 
 def _norm_cdf(x: float) -> float:
     return (1.0 + math.erf(x / math.sqrt(2.0))) / 2.0
@@ -172,6 +205,10 @@ def _scan_core():
     except Exception as _vix_err:
         logger.debug("VIX fetch failed — proceeding without filter: %s", _vix_err)
 
+    # IV Rank — computed once per day, cached. None = data unavailable, filter skipped.
+    _iv_rank_max = _s_early.get("IV_RANK_MAX", config.IV_RANK_MAX)
+    _iv_rank     = _get_iv_rank()
+
     # Active filters — read settings ONCE per scan so all decisions use consistent values
     # BUG 13 fix: previously load_settings() was called 3+ times during a single scan,
     # meaning a dashboard change mid-scan could cause different parts to see different settings.
@@ -249,6 +286,16 @@ def _scan_core():
             # Time-of-day filter: CE signals only after 11:00 AM (morning IV not settled)
             if zone.zone_class == "demand" and datetime.now().hour < 11:
                 logger.info("[%s] Skipped — CE before 11:00 AM, morning IV not settled", tf)
+                continue
+
+            # IV Rank filter: skip when premium is historically expensive
+            # High IV Rank = IV is in top percentile of 52-week range = crush risk
+            if _iv_rank is not None and _iv_rank > _iv_rank_max:
+                logger.info(
+                    "[%s] Skipped — IV Rank %.1f%% > %.0f%% limit. "
+                    "Premium historically expensive — IV crush risk on naked options.",
+                    tf, _iv_rank, _iv_rank_max,
+                )
                 continue
 
             # Skip if this exact zone already signaled today
@@ -405,7 +452,7 @@ def _scan_core():
                         target=signal.intraday_target, score=signal.boosters.total,
                         confluence=signal.confluence.label(),
                         strike=_strike_display, opt_type=_opt_type,
-                        delta=_delta, vix=vix,
+                        delta=_delta, vix=vix, iv_rank=_iv_rank,
                     )
             else:
                 # ── Normal flow: send Telegram notification for manual approval ──
@@ -420,7 +467,7 @@ def _scan_core():
                     score=signal.boosters.total,
                     confluence=signal.confluence.label(),
                     strike=_strike_display, opt_type=_opt_type,
-                    delta=_delta, vix=vix,
+                    delta=_delta, vix=vix, iv_rank=_iv_rank,
                 )
 
 
