@@ -48,7 +48,11 @@ broker = get_broker()
 # TFs in ascending order — lower index = lower timeframe
 _TF_ORDER = [config.TF_LOWER, config.TF_INTERMEDIATE, config.TF_HIGHER]
 
-# VIX direction tracking — baseline set on first scan of each trading day
+# Scan concurrency guard — prevents two overlapping scans when one hangs
+_scan_lock = threading.Lock()
+
+# VIX direction tracking — tracks today's running low so a temporary spike that
+# resolves doesn't permanently block CE signals for the rest of the day.
 _vix_baseline: float = 0.0
 _vix_baseline_date: str = ""
 
@@ -138,7 +142,19 @@ def scan():
     if not is_market_open():
         logger.info("Outside market hours — skipping scan.")
         return
-    _scan_core()
+    if not _scan_lock.acquire(blocking=False):
+        logger.warning("Previous scan still running — skipping this cycle.")
+        return
+
+    def _run():
+        try:
+            _scan_core()
+        except Exception as e:
+            logger.exception("Unhandled exception in scan thread: %s", e)
+        finally:
+            _scan_lock.release()
+
+    threading.Thread(target=_run, name="scan-worker", daemon=True).start()
 
 
 def scan_now():
@@ -191,8 +207,13 @@ def _scan_core():
             _vix_baseline = vix
             _vix_baseline_date = today_str
             logger.info("India VIX baseline set: %.2f", vix)
-        vix_rising = vix > _vix_baseline * 1.02   # >2% above today's first reading
-        logger.info("India VIX: %.2f (open %.2f, limit %.1f) — %s",
+        elif vix < _vix_baseline:
+            # VIX dropped below today's low — update baseline so a resolved spike
+            # doesn't permanently block CE signals for the rest of the day.
+            _vix_baseline = vix
+            logger.info("India VIX baseline updated (VIX fell): %.2f", _vix_baseline)
+        vix_rising = vix > _vix_baseline * 1.05   # >5% above today's running low
+        logger.info("India VIX: %.2f (low %.2f, limit %.1f) — %s",
                     vix, _vix_baseline, _vix_max,
                     "RISING ⚠️ CE signals blocked" if vix_rising else "stable")
         if vix > _vix_max:

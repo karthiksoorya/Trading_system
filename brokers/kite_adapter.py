@@ -30,7 +30,7 @@ _INSTRUMENTS_TTL = 1800   # seconds — refresh every 30 min
 class KiteAdapter(BrokerBase):
 
     def __init__(self):
-        self._kite = KiteConnect(api_key=config.KITE_API_KEY)
+        self._kite = KiteConnect(api_key=config.KITE_API_KEY, timeout=10)
         self._token_loaded = False
         self._load_token()
 
