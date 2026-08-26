@@ -1,0 +1,573 @@
+<title>Kite Token Flow</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap">
+
+<style>
+  :root {
+    --bg:        #09141F;
+    --surface:   #0F1E2E;
+    --surface-2: #162840;
+    --border:    #1E3A58;
+    --text:      #C4D9EE;
+    --muted:     #516E8A;
+    --faint:     #233A52;
+
+    --kite:      #3D8EE8;
+    --kite-dim:  #1E4A7A;
+    --vps:       #27C97A;
+    --vps-dim:   #0D5232;
+    --user:      #F5A623;
+    --user-dim:  #7A4C08;
+    --danger:    #E84747;
+    --danger-dim:#6A1A1A;
+    --success:   #27C97A;
+  }
+
+  @media (prefers-color-scheme: light) {
+    :root:not([data-theme="dark"]) {
+      --bg:        #EEF4FB;
+      --surface:   #FFFFFF;
+      --surface-2: #E0EAF6;
+      --border:    #BBCFE8;
+      --text:      #0F2035;
+      --muted:     #5A7A9A;
+      --faint:     #D2E2F4;
+      --kite-dim:  #DAEAF8;
+      --vps-dim:   #D4F4E5;
+      --user-dim:  #FEF3DC;
+      --danger-dim:#FDE8E8;
+    }
+  }
+  :root[data-theme="light"] {
+    --bg:        #EEF4FB;
+    --surface:   #FFFFFF;
+    --surface-2: #E0EAF6;
+    --border:    #BBCFE8;
+    --text:      #0F2035;
+    --muted:     #5A7A9A;
+    --faint:     #D2E2F4;
+    --kite-dim:  #DAEAF8;
+    --vps-dim:   #D4F4E5;
+    --user-dim:  #FEF3DC;
+    --danger-dim:#FDE8E8;
+  }
+
+  *, *::before, *::after { box-sizing: border-box; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Inter', sans-serif;
+    margin: 0;
+    padding: 48px 28px 64px;
+    min-height: 100vh;
+  }
+
+  .page { max-width: 960px; margin-inline: auto; }
+
+  /* ── Header ─────────────────────────────────────────── */
+  .header { margin-bottom: 52px; }
+  .eyebrow {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    letter-spacing: .12em;
+    text-transform: uppercase;
+    color: var(--kite);
+    margin-bottom: 10px;
+  }
+  .header h1 {
+    font-size: clamp(22px, 4vw, 32px);
+    font-weight: 600;
+    line-height: 1.2;
+    margin: 0 0 12px;
+    text-wrap: balance;
+  }
+  .header p {
+    font-size: 15px;
+    color: var(--muted);
+    max-width: 58ch;
+    line-height: 1.6;
+    margin: 0;
+  }
+
+  /* ── Flow section ───────────────────────────────────── */
+  .flow-section { margin-bottom: 48px; }
+
+  .section-label {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 20px;
+  }
+  .section-label .badge {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    letter-spacing: .1em;
+    text-transform: uppercase;
+    padding: 3px 9px;
+    border-radius: 3px;
+    font-weight: 500;
+  }
+  .badge-old  { background: var(--danger-dim); color: var(--danger); }
+  .badge-new  { background: var(--vps-dim);    color: var(--vps); }
+  .section-label .line {
+    flex: 1;
+    height: 1px;
+    background: var(--border);
+  }
+  .section-label .desc {
+    font-size: 13px;
+    color: var(--muted);
+  }
+
+  /* ── Flow row ───────────────────────────────────────── */
+  .flow {
+    display: flex;
+    align-items: stretch;
+    gap: 0;
+    overflow-x: auto;
+    padding-bottom: 4px;
+  }
+
+  .node {
+    flex: 0 0 auto;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 14px 16px;
+    min-width: 120px;
+    max-width: 148px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 7px;
+    text-align: center;
+    position: relative;
+  }
+
+  .node-icon {
+    font-size: 22px;
+    line-height: 1;
+  }
+  .node-title {
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 1.3;
+    color: var(--text);
+  }
+  .node-sub {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 9.5px;
+    color: var(--muted);
+    line-height: 1.5;
+    word-break: break-all;
+  }
+
+  /* color variants */
+  .node-user   { border-color: var(--user);  background: color-mix(in srgb, var(--user-dim) 60%, var(--surface)); }
+  .node-kite   { border-color: var(--kite);  background: color-mix(in srgb, var(--kite-dim) 60%, var(--surface)); }
+  .node-vps    { border-color: var(--vps);   background: color-mix(in srgb, var(--vps-dim)  60%, var(--surface)); }
+  .node-bad    { border-color: var(--danger); background: color-mix(in srgb, var(--danger-dim) 60%, var(--surface)); }
+  .node-good   { border-color: var(--vps);   background: color-mix(in srgb, var(--vps-dim)  60%, var(--surface)); }
+
+  /* old flow — dimmed */
+  .flow-old .node         { opacity: .55; }
+  .flow-old .node-bad     { opacity: 1; }  /* highlight the pain point */
+
+  /* arrow */
+  .arrow {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    padding: 0 2px;
+    color: var(--muted);
+  }
+  .arrow svg { width: 28px; height: 16px; }
+  .flow-old .arrow { opacity: .4; }
+
+  /* redirect highlight band */
+  .redirect-band {
+    margin: 28px 0 20px;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 18px 22px;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+  .redirect-band h3 {
+    font-size: 11px;
+    font-family: 'JetBrains Mono', monospace;
+    letter-spacing: .1em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin: 0 0 4px;
+  }
+  .redirect-row {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    flex-wrap: wrap;
+  }
+  .redirect-label {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--muted);
+    min-width: 44px;
+  }
+  .redirect-label.old { color: var(--danger); }
+  .redirect-label.new { color: var(--vps);    }
+  .redirect-url {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 13px;
+    padding: 6px 12px;
+    border-radius: 4px;
+    flex: 1;
+    word-break: break-all;
+  }
+  .redirect-url.old {
+    background: var(--danger-dim);
+    color: var(--danger);
+    text-decoration: line-through;
+    opacity: .7;
+  }
+  .redirect-url.new {
+    background: var(--vps-dim);
+    color: var(--vps);
+  }
+  .redirect-url .highlight {
+    font-weight: 600;
+    background: color-mix(in srgb, var(--vps) 20%, transparent);
+    padding: 0 2px;
+    border-radius: 2px;
+  }
+
+  /* ── Config diff ────────────────────────────────────── */
+  .config-section {
+    margin-bottom: 48px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+  }
+  .config-header {
+    background: var(--surface-2);
+    padding: 12px 20px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    border-bottom: 1px solid var(--border);
+  }
+  .config-header span {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--text);
+  }
+  .config-header .dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+  }
+  .config-body { padding: 20px; display: flex; flex-direction: column; gap: 12px; }
+  .config-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 13px;
+  }
+  .config-step {
+    background: var(--faint);
+    color: var(--muted);
+    border-radius: 3px;
+    padding: 2px 8px;
+    font-size: 11px;
+    flex-shrink: 0;
+    margin-top: 2px;
+  }
+  .config-code { color: var(--text); line-height: 1.6; }
+  .config-code .key { color: var(--kite); }
+  .config-code .val { color: var(--vps); }
+  .config-code .changed {
+    background: color-mix(in srgb, var(--vps) 12%, transparent);
+    padding: 2px 5px;
+    border-radius: 3px;
+  }
+  .config-note {
+    font-size: 11px;
+    color: var(--muted);
+    font-family: 'Inter', sans-serif;
+    margin-top: 2px;
+  }
+
+  /* ── Morning flow ───────────────────────────────────── */
+  .morning {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 24px;
+    margin-bottom: 48px;
+  }
+  .morning h2 {
+    font-size: 14px;
+    font-weight: 600;
+    margin: 0 0 20px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .steps { display: flex; flex-direction: column; gap: 0; }
+  .step {
+    display: grid;
+    grid-template-columns: 28px 1fr;
+    gap: 0 14px;
+    position: relative;
+  }
+  .step:not(:last-child)::before {
+    content: '';
+    position: absolute;
+    left: 13px;
+    top: 28px;
+    bottom: -1px;
+    width: 2px;
+    background: var(--border);
+  }
+  .step-num {
+    width: 28px; height: 28px;
+    border-radius: 50%;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 12px; font-weight: 600;
+    color: var(--muted);
+    flex-shrink: 0;
+    position: relative;
+    z-index: 1;
+  }
+  .step.active .step-num {
+    background: var(--vps-dim);
+    border-color: var(--vps);
+    color: var(--vps);
+  }
+  .step-content {
+    padding: 4px 0 24px;
+  }
+  .step-title {
+    font-size: 14px;
+    font-weight: 600;
+    margin-bottom: 3px;
+  }
+  .step-desc {
+    font-size: 13px;
+    color: var(--muted);
+    line-height: 1.5;
+  }
+  .step-code {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 6px 10px;
+    margin-top: 8px;
+    color: var(--vps);
+    display: inline-block;
+  }
+  .time-tag {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    color: var(--user);
+    margin-left: 8px;
+    font-weight: 500;
+  }
+</style>
+
+<div class="page">
+
+  <div class="header">
+    <div class="eyebrow">Kite Connect · OAuth Flow</div>
+    <h1>Auto Token Capture via VPS</h1>
+    <p>One redirect URL change moves token capture from your clipboard to the server. Login from your phone — VPS does the rest.</p>
+  </div>
+
+  <!-- Manual flow -->
+  <div class="flow-section">
+    <div class="section-label">
+      <span class="badge badge-old">Before — Manual</span>
+      <div class="line"></div>
+      <span class="desc">Token capture requires copy-paste at a computer</span>
+    </div>
+
+    <div class="flow flow-old">
+      <div class="node node-user">
+        <div class="node-icon">📱</div>
+        <div class="node-title">You</div>
+        <div class="node-sub">open login URL</div>
+      </div>
+      <div class="arrow"><svg viewBox="0 0 28 16" fill="none"><path d="M2 8h20M16 3l6 5-6 5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+      <div class="node node-kite">
+        <div class="node-icon">🔑</div>
+        <div class="node-title">Kite Login</div>
+        <div class="node-sub">password + TOTP</div>
+      </div>
+      <div class="arrow"><svg viewBox="0 0 28 16" fill="none"><path d="M2 8h20M16 3l6 5-6 5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+      <div class="node node-kite">
+        <div class="node-icon">🔄</div>
+        <div class="node-title">Kite redirects</div>
+        <div class="node-sub">localhost/?token=abc…</div>
+      </div>
+      <div class="arrow"><svg viewBox="0 0 28 16" fill="none"><path d="M2 8h20M16 3l6 5-6 5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+      <div class="node node-bad">
+        <div class="node-icon">📋</div>
+        <div class="node-title">Copy from URL bar</div>
+        <div class="node-sub">manual step — needs laptop</div>
+      </div>
+      <div class="arrow"><svg viewBox="0 0 28 16" fill="none"><path d="M2 8h20M16 3l6 5-6 5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+      <div class="node node-bad">
+        <div class="node-icon">📌</div>
+        <div class="node-title">Paste in dashboard</div>
+        <div class="node-sub">exchange for token</div>
+      </div>
+      <div class="arrow"><svg viewBox="0 0 28 16" fill="none"><path d="M2 8h20M16 3l6 5-6 5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+      <div class="node">
+        <div class="node-icon">💾</div>
+        <div class="node-title">Token saved</div>
+        <div class="node-sub">.kite_token</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- What changes -->
+  <div class="redirect-band">
+    <h3>The only change — redirect URL</h3>
+    <div class="redirect-row">
+      <span class="redirect-label old">Old</span>
+      <code class="redirect-url old">http://localhost/?request_token=…</code>
+    </div>
+    <div class="redirect-row">
+      <span class="redirect-label new">New</span>
+      <code class="redirect-url new">http://<span class="highlight">13.201.210.4:5000</span>/?request_token=…</code>
+    </div>
+  </div>
+
+  <!-- Auto flow -->
+  <div class="flow-section">
+    <div class="section-label">
+      <span class="badge badge-new">After — Auto</span>
+      <div class="line"></div>
+      <span class="desc">VPS captures token from the redirect — no copy-paste</span>
+    </div>
+
+    <div class="flow flow-new">
+      <div class="node node-user">
+        <div class="node-icon">📱</div>
+        <div class="node-title">You</div>
+        <div class="node-sub">phone only</div>
+      </div>
+      <div class="arrow"><svg viewBox="0 0 28 16" fill="none"><path d="M2 8h20M16 3l6 5-6 5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+      <div class="node node-kite">
+        <div class="node-icon">🔑</div>
+        <div class="node-title">Kite Login</div>
+        <div class="node-sub">password + TOTP</div>
+      </div>
+      <div class="arrow"><svg viewBox="0 0 28 16" fill="none"><path d="M2 8h20M16 3l6 5-6 5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+      <div class="node node-kite">
+        <div class="node-icon">🔄</div>
+        <div class="node-title">Kite redirects</div>
+        <div class="node-sub">13.201.210.4:5000 /?token=abc…</div>
+      </div>
+      <div class="arrow"><svg viewBox="0 0 28 16" fill="none"><path d="M2 8h20M16 3l6 5-6 5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+      <div class="node node-vps">
+        <div class="node-icon">🖥️</div>
+        <div class="node-title">VPS port 5000</div>
+        <div class="node-sub">HTTP server reads token automatically</div>
+      </div>
+      <div class="arrow"><svg viewBox="0 0 28 16" fill="none"><path d="M2 8h20M16 3l6 5-6 5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+      <div class="node node-vps">
+        <div class="node-icon">💾</div>
+        <div class="node-title">Token saved</div>
+        <div class="node-sub">generate_session() called</div>
+      </div>
+      <div class="arrow"><svg viewBox="0 0 28 16" fill="none"><path d="M2 8h20M16 3l6 5-6 5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+      <div class="node node-good">
+        <div class="node-icon">🚀</div>
+        <div class="node-title">Engine starts</div>
+        <div class="node-sub">phone shows "Token captured"</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Setup steps -->
+  <div class="config-section">
+    <div class="config-header">
+      <div class="dot" style="background:var(--danger)"></div>
+      <div class="dot" style="background:var(--user)"></div>
+      <div class="dot" style="background:var(--vps)"></div>
+      <span>One-time setup — 3 steps</span>
+    </div>
+    <div class="config-body">
+
+      <div class="config-item">
+        <span class="config-step">1</span>
+        <div>
+          <div class="config-code">
+            <span class="key">Kite Developer Console</span> → your app → Redirect URL<br>
+            <span class="val">http://13.201.210.4:5000/</span>
+          </div>
+          <div class="config-note">developers.kite.trade/apps — set redirect URL to your VPS IP</div>
+        </div>
+      </div>
+
+      <div class="config-item">
+        <span class="config-step">2</span>
+        <div>
+          <div class="config-code">
+            AWS Lightsail → Networking → Add rule<br>
+            <span class="val">TCP  5000  Any IPv4</span>  <span style="color:var(--vps)">✓ already done</span>
+          </div>
+          <div class="config-note">Port 5000 is open only while the server is waiting (~3 min each morning)</div>
+        </div>
+      </div>
+
+      <div class="config-item">
+        <span class="config-step">3</span>
+        <div>
+          <div class="config-code">
+            <span class="key">KITE_TOKEN_MODE</span> = <span class="val changed">"auto"</span>
+          </div>
+          <div class="config-note">config.py — already changed and pushed ✓</div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- Morning routine -->
+  <div class="morning">
+    <h2>☀️ Every morning <span class="time-tag">~30 seconds</span></h2>
+    <div class="steps">
+      <div class="step active">
+        <div class="step-num">1</div>
+        <div class="step-content">
+          <div class="step-title">Open the Kite login URL on your phone</div>
+          <div class="step-desc">Bookmark the URL from the Engine tab in your dashboard. Tap to open.</div>
+        </div>
+      </div>
+      <div class="step active">
+        <div class="step-num">2</div>
+        <div class="step-content">
+          <div class="step-title">Login with password + TOTP</div>
+          <div class="step-desc">Your usual Kite credentials. TOTP from your authenticator app.</div>
+        </div>
+      </div>
+      <div class="step active">
+        <div class="step-num">3</div>
+        <div class="step-content">
+          <div class="step-title">Phone shows: "Token captured. You can close this tab."</div>
+          <div class="step-desc">VPS has the token. Engine starts automatically. Nothing else needed.</div>
+          <code class="step-code">✓ Access token saved — engine running</code>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
