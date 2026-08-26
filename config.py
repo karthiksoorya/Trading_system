@@ -98,7 +98,7 @@ KITE_API_SECRET = os.getenv("KITE_API_SECRET", "")
 #     1. Change to KITE_TOKEN_MODE = "auto"
 #     2. Update Kite app redirect URL to http://YOUR_VPS_IP:5000/
 #     3. Open port 5000 on VPS firewall
-KITE_TOKEN_MODE = "manual"
+KITE_TOKEN_MODE = "auto"
 KITE_TOKEN_PORT = 5000
 
 # ── Computed ───────────────────────────────────────────────────────────────
