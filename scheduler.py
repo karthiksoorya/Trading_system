@@ -420,8 +420,8 @@ def _scan_core():
                             approve_signal(sig_id)
                             update_signal_order(sig_id, _oid, _contract["symbol"], _qty)
                             logger.info("AUTO-TRADE placed: %s order #%s", _contract["symbol"], _oid)
-                            time.sleep(3)
-                            _fill = _k.get_order_fill_price(_oid)
+                            time.sleep(6)   # 6s: limit orders need time to settle before average_price is final
+                            _fill = _k.get_order_fill_price(_oid, retries=5, wait=3.0)
                             if _fill > 0:
                                 update_signal_entry_price(sig_id, _fill)
                             notify.signal_auto_approved(
@@ -507,8 +507,8 @@ def _live_exit(trade: dict, reason: str):
             _sell_oid = _ka.place_options_order(opts_sym, "SELL", qty)
             logger.info("Live exit order placed: SELL %s ×%d (%s) → order #%s", opts_sym, qty, reason, _sell_oid)
             # Wait for fill then record actual exit premium
-            time.sleep(3)
-            _fill = _ka.get_order_fill_price(_sell_oid)
+            time.sleep(6)   # 6s: same as BUY — let Kite settle average_price before reading
+            _fill = _ka.get_order_fill_price(_sell_oid, retries=5, wait=3.0)
             if _fill > 0:
                 update_signal_exit_order(trade["id"], _sell_oid, _fill)
                 logger.info("Options exit price recorded: %.2f for trade #%d", _fill, trade["id"])
