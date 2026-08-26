@@ -726,6 +726,67 @@ def end_of_day():
                        total_pnl=pnl, total_options_pnl=total_options_pnl)
 
 
+def _simulate_signal_outcome(signal: dict, candles: list) -> dict:
+    """Bar-by-bar simulate what would have happened if this signal was approved.
+    Checks 5-min candles from signal time onward — first touch of target or SL wins.
+    Returns sim_outcome ('target'|'stoploss'|'eod') and sim_pnl in index points.
+    """
+    sig_time = signal["time_signal"]          # "HH:MM:SS"
+    entry     = signal["entry"]
+    sl        = signal["stop_loss"]
+    target    = signal["intraday_target"]
+    zone_class = signal["zone_class"]
+
+    relevant = [c for c in candles if c.timestamp.strftime("%H:%M:%S") >= sig_time]
+
+    for candle in relevant:
+        if zone_class == "demand":
+            if candle.low  <= sl:     return {"sim_outcome": "stoploss", "sim_pnl": round(sl     - entry, 1)}
+            if candle.high >= target: return {"sim_outcome": "target",   "sim_pnl": round(target - entry, 1)}
+        else:
+            if candle.high >= sl:     return {"sim_outcome": "stoploss", "sim_pnl": round(entry - sl,     1)}
+            if candle.low  <= target: return {"sim_outcome": "target",   "sim_pnl": round(entry - target, 1)}
+
+    last_price = candles[-1].close if candles else entry
+    eod_pnl = round((last_price - entry) if zone_class == "demand" else (entry - last_price), 1)
+    return {"sim_outcome": "eod", "sim_pnl": eod_pnl}
+
+
+def eod_signal_review():
+    """After EOD: simulate outcomes of expired/rejected signals and send Telegram summary."""
+    from journal.db import get_signals_for_date
+    from datetime import date as _date
+
+    today = _date.today().isoformat()
+    all_signals = [dict(r) for r in get_signals_for_date(today)]
+    if not all_signals:
+        return
+
+    try:
+        candles = broker.get_historical(config.NIFTY_SYMBOL, "5minute", days=1)
+    except Exception as e:
+        logger.warning("EOD review: couldn't fetch candles — %s", e)
+        return
+
+    taken   = [s for s in all_signals if s["status"] == "closed"]
+    skipped = [s for s in all_signals if s["status"] in ("expired", "rejected")]
+
+    if not skipped and not taken:
+        return
+
+    simulated = []
+    for sig in skipped:
+        outcome = _simulate_signal_outcome(sig, candles)
+        simulated.append({**sig, **outcome})
+        logger.info(
+            "EOD review #%d %s %s — simulated: %s %+.1f pts",
+            sig["id"], sig["zone_type"], sig["zone_class"],
+            outcome["sim_outcome"], outcome["sim_pnl"],
+        )
+
+    notify.eod_signal_review(taken, simulated)
+
+
 def _backup_job():
     try:
         import backup
@@ -750,8 +811,9 @@ def run():
     schedule.every(5).minutes.do(scan)
     schedule.every(1).minutes.do(monitor_open_trades)
     schedule.every(1).minutes.do(check_pending_freshness)
-    schedule.every().day.at("15:20").do(end_of_day)    # 10 min before close
-    schedule.every().day.at("15:45").do(_backup_job)   # after EOD close
+    schedule.every().day.at("15:20").do(end_of_day)         # 10 min before close
+    schedule.every().day.at("15:30").do(eod_signal_review)  # simulate skipped signals
+    schedule.every().day.at("15:45").do(_backup_job)        # after EOD close
 
     logger.info("Scheduler running. Waiting for %s...", config.SCAN_START)
 

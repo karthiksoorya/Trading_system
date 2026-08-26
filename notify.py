@@ -188,6 +188,49 @@ def backup_result(success: bool, message: str):
         _send(f"❌ <b>Backup Failed</b>\n{message}")
 
 
+def eod_signal_review(taken: list, simulated: list):
+    """Send EOD review: actual closed trades + simulated outcomes for skipped signals."""
+    lines = ["📊 <b>EOD Signal Review</b>"]
+
+    if taken:
+        lines.append("\n<b>✅ Trades taken:</b>")
+        for t in taken:
+            emoji = "🎯" if t.get("result") == "win" else ("🛑" if t.get("result") == "loss" else "⏰")
+            pnl_str = f"{t['pnl_points']:+.1f} pts" if t.get("pnl_points") is not None else "—"
+            opts_str = ""
+            if t.get("options_entry_price") and t.get("options_exit_price"):
+                opts_pnl = (t["options_exit_price"] - t["options_entry_price"]) * (t.get("options_lot_size") or 65)
+                opts_str = f" | ₹{opts_pnl:+.0f}"
+            reason = t.get("exit_reason", "")
+            lines.append(f"{emoji} #{t['id']} {t['zone_type']} — {pnl_str}{opts_str} ({reason})")
+
+    if simulated:
+        lines.append("\n<b>⏭ Skipped (what would have happened):</b>")
+        for s in simulated:
+            if s["sim_outcome"] == "target":
+                emoji = "✅"
+            elif s["sim_outcome"] == "stoploss":
+                emoji = "❌"
+            else:
+                emoji = "➖"
+            opt_label = "CE" if s["zone_class"] == "demand" else "PE"
+            lines.append(
+                f"{emoji} #{s['id']} {s['zone_type']} {opt_label} — "
+                f"{s['sim_pnl']:+.1f} pts ({s['sim_outcome']})"
+            )
+
+        sim_wins  = sum(1 for s in simulated if s["sim_outcome"] == "target")
+        sim_loss  = sum(1 for s in simulated if s["sim_outcome"] == "stoploss")
+        total_sim = sum(s["sim_pnl"] for s in simulated)
+        lines.append(
+            f"\n<b>Skipped summary:</b> {sim_wins}W / {sim_loss}L / "
+            f"{len(simulated) - sim_wins - sim_loss} neutral | "
+            f"Total: {total_sim:+.1f} pts"
+        )
+
+    _send("\n".join(lines))
+
+
 def eod_summary(trades: int, wins: int, losses: int, total_pnl: float,
                 total_options_pnl: float | None = None):
     pnl_str = f"+{total_pnl:.2f}" if total_pnl >= 0 else f"{total_pnl:.2f}"
