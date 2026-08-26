@@ -335,6 +335,14 @@ class KiteAdapter(BrokerBase):
         logger.warning("Fill price unavailable for order %s after %d attempts", order_id, retries)
         return 0.0
 
+    def get_options_ltp(self, instrument_key: str) -> float | None:
+        try:
+            sym = f"NFO:{instrument_key}"
+            return self._kite.ltp([sym])[sym]["last_price"]
+        except Exception as e:
+            logger.debug("Options LTP failed for %s: %s", instrument_key, e)
+            return None
+
     def get_funds(self) -> dict:
         """Return available equity margin from Kite. Keys: cash, live_balance, used."""
         try:

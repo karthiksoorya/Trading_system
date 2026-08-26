@@ -540,6 +540,22 @@ with tab_engine:
 
     _current = config.load_settings()
 
+    # ── Broker ────────────────────────────────────────────────────────────
+    _broker_options = ["kite", "upstox"]
+    _broker_idx = _broker_options.index(_current.get("BROKER", config.BROKER)) \
+                  if _current.get("BROKER", config.BROKER) in _broker_options else 0
+    broker_choice = st.selectbox(
+        "Broker",
+        options=_broker_options,
+        index=_broker_idx,
+        help="Switch between Kite and Upstox. Restart engine after changing.",
+        format_func=lambda b: {"kite": "Zerodha Kite", "upstox": "Upstox"}.get(b, b),
+    )
+    if broker_choice != _current.get("BROKER", config.BROKER):
+        st.warning("Broker changed — save and restart engine to apply.", icon="⚠️")
+
+    st.divider()
+
     sl_buffer = st.slider(
         "Stop Loss Buffer (points beyond distal line)",
         min_value=0, max_value=30,
@@ -688,6 +704,7 @@ with tab_engine:
             st.error("Select at least one zone class.")
         else:
             config.save_settings({
+                "BROKER":                broker_choice,
                 "SL_BUFFER_POINTS":      sl_buffer,
                 "ENTRY_TIMEFRAME":       entry_tf,
                 "SCAN_TIMEFRAMES":       scan_tfs,

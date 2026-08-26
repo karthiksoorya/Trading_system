@@ -428,21 +428,19 @@ def _scan_core():
                 _auto_ok = False
                 if _s.get("MODE") == "live":
                     try:
-                        from brokers.kite_adapter import KiteAdapter as _KA
-                        _k = _KA()
-                        if not _k._token_loaded:
-                            logger.warning("AUTO-TRADE: no Kite token — falling back to manual approval.")
+                        if not broker.is_connected():
+                            logger.warning("AUTO-TRADE: broker not connected — falling back to manual approval.")
                         else:
-                            _k.validate_entry(signal.entry, signal.stop_loss, signal.zone.zone_class)
-                            _contract = _k.get_options_contract(signal.entry, signal.zone.zone_class)
+                            broker.validate_entry(signal.entry, signal.stop_loss, signal.zone.zone_class)
+                            _contract = broker.get_options_contract(signal.entry, signal.zone.zone_class)
                             _qty      = _contract["lot_size"]
-                            _oid      = _k.place_options_order(_contract["symbol"], "BUY", _qty)
+                            _oid      = broker.place_options_order(_contract["symbol"], "BUY", _qty)
                             # Order placed — approve now and record
                             approve_signal(sig_id)
                             update_signal_order(sig_id, _oid, _contract["symbol"], _qty)
                             logger.info("AUTO-TRADE placed: %s order #%s", _contract["symbol"], _oid)
                             time.sleep(6)   # 6s: limit orders need time to settle before average_price is final
-                            _fill = _k.get_order_fill_price(_oid, retries=5, wait=3.0)
+                            _fill = broker.get_order_fill_price(_oid, retries=5, wait=3.0)
                             if _fill > 0:
                                 update_signal_entry_price(sig_id, _fill)
                             notify.signal_auto_approved(
@@ -519,33 +517,29 @@ def _live_exit(trade: dict, reason: str):
         # BUG 1 fix: use the lot size that was stored at entry time
         qty = trade.get("options_lot_size") or 0
         try:
-            from brokers.kite_adapter import KiteAdapter
             from journal.db import update_signal_exit_order
-            _ka = KiteAdapter()
             if not qty:
-                qty = _ka.get_lot_size()   # fallback only if entry qty was never stored
-                logger.warning("options_lot_size missing for trade #%d — falling back to current lot size %d", trade["id"], qty)
-            _sell_oid = _ka.place_options_order(opts_sym, "SELL", qty)
+                qty = broker.get_lot_size() if hasattr(broker, "get_lot_size") else config.NIFTY_LOT_SIZE
+                logger.warning("options_lot_size missing for trade #%d — falling back to %d", trade["id"], qty)
+            _sell_oid = broker.place_options_order(opts_sym, "SELL", qty)
             logger.info("Live exit order placed: SELL %s ×%d (%s) → order #%s", opts_sym, qty, reason, _sell_oid)
             # Wait for fill then record actual exit premium
-            time.sleep(6)   # 6s: same as BUY — let Kite settle average_price before reading
-            _fill = _ka.get_order_fill_price(_sell_oid, retries=5, wait=3.0)
+            time.sleep(6)   # 6s: let broker settle average_price before reading
+            _fill = broker.get_order_fill_price(_sell_oid, retries=5, wait=3.0)
             if _fill > 0:
                 update_signal_exit_order(trade["id"], _sell_oid, _fill)
                 logger.info("Options exit price recorded: %.2f for trade #%d", _fill, trade["id"])
         except Exception as ex:
             logger.error("Live exit order FAILED for %s: %s", opts_sym, ex)
-            notify._send(f"⚠️ Exit order FAILED for {opts_sym} ({reason}): {ex}\nClose manually on Kite!")
+            notify._send(f"⚠️ Exit order FAILED for {opts_sym} ({reason}): {ex}\nClose manually on broker!")
 
 
 def _get_options_ltp(opts_sym: str) -> float | None:
-    """Fetch current options premium. Returns None on failure — never blocks exit logic."""
+    """Fetch current options premium via the active broker. Returns None on failure."""
     if not opts_sym:
         return None
     try:
-        from brokers.kite_adapter import KiteAdapter
-        _ka = KiteAdapter()
-        return _ka._kite.ltp([f"NFO:{opts_sym}"])[f"NFO:{opts_sym}"]["last_price"]
+        return broker.get_options_ltp(opts_sym)
     except Exception as e:
         logger.debug("Options LTP fetch failed for %s: %s", opts_sym, e)
         return None

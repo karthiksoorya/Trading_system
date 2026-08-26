@@ -73,3 +73,13 @@ class BrokerBase(ABC):
     @abstractmethod
     def is_connected(self) -> bool:
         """True if the broker session is valid."""
+
+    def get_options_ltp(self, instrument_key: str) -> float | None:
+        """Live premium for an options contract. Returns None on failure.
+
+        instrument_key is whatever format the broker stores in options_symbol:
+          Kite   → "NIFTY24500CE"  (tradingsymbol, looked up as NFO:symbol)
+          Upstox → "NSE_FO|37668"  (instrument_key from option chain)
+        Default implementation returns None — override in each adapter.
+        """
+        return None

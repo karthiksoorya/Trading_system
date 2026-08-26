@@ -130,6 +130,7 @@ celerybeat.pid
 # Environments
 .env
 .kite_token
+.upstox_token
 .venv
 env/
 venv/

@@ -91,15 +91,22 @@ TIME_EXIT_HOUR      = 13    # close at 13:00 if target not reached
 KITE_API_KEY    = os.getenv("KITE_API_KEY", "")
 KITE_API_SECRET = os.getenv("KITE_API_SECRET", "")
 
-# ── Token Mode ─────────────────────────────────────────────────────────────
-# "manual" → Option A: print URL, paste request_token in terminal (laptop)
+# ── Upstox API Credentials (set via environment variables) ────────────────
+# Export in terminal: set UPSTOX_API_KEY=xxx  /  set UPSTOX_API_SECRET=xxx
+# UPSTOX_REDIRECT_URI must match exactly what is set in Upstox developer console.
+UPSTOX_API_KEY      = os.getenv("UPSTOX_API_KEY", "")
+UPSTOX_API_SECRET   = os.getenv("UPSTOX_API_SECRET", "")
+UPSTOX_REDIRECT_URI = os.getenv("UPSTOX_REDIRECT_URI", f"http://localhost:5000/")
+
+# ── Token Mode (applies to both brokers) ───────────────────────────────────
+# "manual" → Option A: print URL, paste auth code in terminal (laptop)
 # "auto"   → Option B: VPS captures token via HTTP redirect automatically
 #   To switch to auto:
-#     1. Change to KITE_TOKEN_MODE = "auto"
-#     2. Update Kite app redirect URL to http://YOUR_VPS_IP:5000/
+#     1. Change to TOKEN_MODE = "auto"
+#     2. Update broker app redirect URL to http://YOUR_VPS_IP:5000/
 #     3. Open port 5000 on VPS firewall
 KITE_TOKEN_MODE = "auto"
-KITE_TOKEN_PORT = 5000
+TOKEN_PORT      = 5000
 
 # ── Computed ───────────────────────────────────────────────────────────────
 MAX_DAILY_LOSS   = CAPITAL * MAX_RISK_PCT          # ₹100
@@ -129,6 +136,7 @@ def save_settings(overrides: dict):
     SETTINGS_FILE.write_text(json.dumps(current, indent=2))
 
 _s = load_settings()
+BROKER                = _s.get("BROKER",                BROKER)
 MODE                  = _s.get("MODE",                  MODE)
 SL_BUFFER_POINTS      = _s.get("SL_BUFFER_POINTS",      SL_BUFFER_POINTS)
 SIGNAL_EXPIRY_MINUTES = _s.get("SIGNAL_EXPIRY_MINUTES", SIGNAL_EXPIRY_MINUTES)
