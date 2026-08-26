@@ -32,7 +32,7 @@ from engine.position_size import calculate as size_trade
 from journal.db import (init_db, log_signal, trades_today, daily_pnl, get_open_trades,
                         close_trade, zone_signaled_today, expire_old_pending,
                         approve_signal, update_signal_order, update_signal_entry_price,
-                        reject_signal)
+                        reject_signal, update_signal_sim_outcome)
 from journal.export import export_day
 import notify
 
@@ -778,8 +778,10 @@ def eod_signal_review():
     for sig in skipped:
         outcome = _simulate_signal_outcome(sig, candles)
         simulated.append({**sig, **outcome})
+        # Persist simulated outcome — ML training data for future model
+        update_signal_sim_outcome(sig["id"], outcome["sim_outcome"], outcome["sim_pnl"])
         logger.info(
-            "EOD review #%d %s %s — simulated: %s %+.1f pts",
+            "EOD review #%d %s %s — simulated: %s %+.1f pts (saved to DB)",
             sig["id"], sig["zone_type"], sig["zone_class"],
             outcome["sim_outcome"], outcome["sim_pnl"],
         )

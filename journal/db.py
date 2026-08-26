@@ -102,6 +102,8 @@ def _migrate(con):
         ("options_exit_order_id", "TEXT"),
         ("options_lot_size",    "INTEGER"),
         ("closed_by",           "TEXT"),
+        ("sim_outcome",         "TEXT"),   # target | stoploss | eod — simulated for skipped signals
+        ("sim_pnl_points",      "REAL"),   # simulated index P&L — for ML training
     ]
     for col, definition in migrations:
         if col not in existing:
@@ -253,6 +255,15 @@ def update_signal_entry_price(signal_id: int, options_entry_price: float) -> Non
         con.execute(
             "UPDATE signals SET options_entry_price=? WHERE id=?",
             (options_entry_price, signal_id),
+        )
+
+
+def update_signal_sim_outcome(signal_id: int, sim_outcome: str, sim_pnl_points: float) -> None:
+    """Store simulated outcome for an expired/rejected signal. Used for ML training data."""
+    with _conn() as con:
+        con.execute(
+            "UPDATE signals SET sim_outcome=?, sim_pnl_points=? WHERE id=?",
+            (sim_outcome, round(sim_pnl_points, 2), signal_id),
         )
 
 

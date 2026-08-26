@@ -19,6 +19,7 @@ _COLUMNS = [
     "confluence_count", "confluence_tfs",
     "exit_time", "exit_price", "exit_reason",
     "pnl_points", "result", "rule_based", "notes", "mode",
+    "sim_outcome", "sim_pnl_points",   # simulated outcome for expired/rejected — ML training
 ]
 
 
