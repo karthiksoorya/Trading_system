@@ -85,6 +85,12 @@ OPTIONS_TRAIL_PCT   = 30    # exit when options up 30% from entry premium
 #   e.g. 13 → exit at 13:00 if still open.
 #   Set to 0 to disable.
 TIME_EXIT_HOUR      = 13    # close at 13:00 if target not reached
+#
+# DAILY_OPTIONS_TARGET: stop accepting new signals once options P&L for the
+#   day reaches this rupee amount. Protects a winning day from giving back
+#   gains on follow-on trades.
+#   Set to 0 to disable.
+DAILY_OPTIONS_TARGET = 0   # ₹0 = disabled
 
 # ── Kite API Credentials (set via environment variables) ──────────────────
 # Export in terminal: set KITE_API_KEY=xxx  /  set KITE_API_SECRET=xxx
@@ -145,3 +151,4 @@ MIN_CONFLUENCE        = _s.get("MIN_CONFLUENCE",         MIN_CONFLUENCE)
 ZONE_APPROACH_POINTS  = _s.get("ZONE_APPROACH_POINTS",  ZONE_APPROACH_POINTS)
 SCAN_TIMEFRAMES       = _s.get("SCAN_TIMEFRAMES",       [TF_LOWER, TF_INTERMEDIATE, TF_HIGHER])
 SCAN_ZONE_CLASSES     = _s.get("SCAN_ZONE_CLASSES",     ["demand", "supply"])
+DAILY_OPTIONS_TARGET  = _s.get("DAILY_OPTIONS_TARGET",  DAILY_OPTIONS_TARGET)

@@ -697,6 +697,28 @@ with tab_engine:
     else:
         st.caption("Fully automated OFF — signals above require manual or first-trade auto only.")
 
+    st.divider()
+    st.subheader("Daily Options P&L Target")
+    daily_opts_target = st.number_input(
+        "Stop new trades when options profit reaches (₹)",
+        min_value=0,
+        max_value=50000,
+        step=100,
+        value=int(_current.get("DAILY_OPTIONS_TARGET", config.DAILY_OPTIONS_TARGET)),
+        help=(
+            "Once your options P&L for the day hits this amount, no new signals will be accepted. "
+            "Set to 0 to disable. Example: 500 → stop after ₹500 options profit. "
+            "Protects a winning day from giving back gains on follow-on trades."
+        ),
+    )
+    if daily_opts_target > 0:
+        st.info(
+            f"🎯 New trades will stop once options P&L reaches **₹{daily_opts_target:,}** today.",
+            icon="🎯",
+        )
+    else:
+        st.caption("Daily options target OFF — no profit-based trade limit.")
+
     if st.button("💾 Save Settings"):
         if not scan_tfs:
             st.error("Select at least one timeframe.")
@@ -717,6 +739,7 @@ with tab_engine:
                 "IV_RANK_MAX":           iv_rank_max,
                 "AUTO_FIRST_TRADE":      auto_first,
                 "FULLY_AUTOMATED":       fully_auto,
+                "DAILY_OPTIONS_TARGET":  daily_opts_target,
             })
             st.success(
                 f"Saved — TF: {entry_tf} | Score ≥ {min_score} | "

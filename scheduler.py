@@ -29,8 +29,8 @@ from engine.confluence import check_confluence
 from engine.zones import detect_zones, update_zone_state
 from engine.signals import generate_signal
 from engine.position_size import calculate as size_trade
-from journal.db import (init_db, log_signal, trades_today, daily_pnl, get_open_trades,
-                        close_trade, zone_signaled_today, expire_old_pending,
+from journal.db import (init_db, log_signal, trades_today, daily_pnl, daily_options_pnl,
+                        get_open_trades, close_trade, zone_signaled_today, expire_old_pending,
                         approve_signal, update_signal_order, update_signal_entry_price,
                         reject_signal, update_signal_sim_outcome)
 from journal.export import export_day
@@ -190,6 +190,16 @@ def _scan_core():
     if daily_pnl() <= -_max_daily_loss:
         logger.warning("Daily loss limit hit (₹%.0f). No more trades today.", _max_daily_loss)
         return
+
+    _daily_options_target = _s_early.get("DAILY_OPTIONS_TARGET", config.DAILY_OPTIONS_TARGET)
+    if _daily_options_target > 0:
+        _opts_pnl = daily_options_pnl()
+        if _opts_pnl >= _daily_options_target:
+            logger.info(
+                "Daily options target hit (₹%.0f ≥ ₹%.0f). Protecting gains — no more trades today.",
+                _opts_pnl, _daily_options_target,
+            )
+            return
 
     logger.info("Scanning %s ...", config.NIFTY_SYMBOL)
     ltp = broker.get_ltp(config.NIFTY_SYMBOL)

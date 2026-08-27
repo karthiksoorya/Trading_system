@@ -425,3 +425,23 @@ def daily_pnl(trade_date: Optional[str] = None) -> float:
             (trade_date,),
         ).fetchone()
         return row["total_pnl"] if row else 0.0
+
+
+def daily_options_pnl(trade_date: Optional[str] = None) -> float:
+    """Sum of (exit - entry) × lot_size for all closed options trades today.
+    Returns 0.0 if no live options trades closed yet, or columns are NULL."""
+    trade_date = trade_date or date.today().isoformat()
+    with _conn() as con:
+        rows = con.execute(
+            """SELECT options_entry_price, options_exit_price, options_lot_size
+               FROM signals
+               WHERE date=? AND status='closed'
+               AND options_entry_price IS NOT NULL
+               AND options_exit_price  IS NOT NULL""",
+            (trade_date,),
+        ).fetchall()
+    total = 0.0
+    for r in rows:
+        lot = r["options_lot_size"] or 65
+        total += (r["options_exit_price"] - r["options_entry_price"]) * lot
+    return round(total, 2)
