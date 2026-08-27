@@ -556,10 +556,10 @@ with tab_engine:
 
     st.divider()
 
-    sl_buffer = st.slider(
+    sl_buffer = st.number_input(
         "Stop Loss Buffer (points beyond distal line)",
         min_value=0, max_value=30,
-        value=_current.get("SL_BUFFER_POINTS", config.SL_BUFFER_POINTS),
+        value=int(_current.get("SL_BUFFER_POINTS", config.SL_BUFFER_POINTS)),
         step=1,
         help="0 = SL exactly at zone edge. 5–10 = buffer to avoid wick stop-outs.",
     )
@@ -595,10 +595,10 @@ with tab_engine:
         help="Pending signals older than this are auto-expired. Default 45 min.",
     )
 
-    zone_approach = st.slider(
+    zone_approach = st.number_input(
         "Zone Approach Distance (points)",
         min_value=10, max_value=200,
-        value=_current.get("ZONE_APPROACH_POINTS", config.ZONE_APPROACH_POINTS),
+        value=int(_current.get("ZONE_APPROACH_POINTS", config.ZONE_APPROACH_POINTS)),
         step=5,
         help="Signal only fires if LTP is within this many points of the zone proximal. "
              "50 = only near zones. Increase if you miss too many signals.",
