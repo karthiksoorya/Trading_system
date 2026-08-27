@@ -259,6 +259,16 @@ def _scan_core():
         logger.info("Outside scan window (%s–%s) — skipping.", _win["start"], _win["end"])
         return
 
+    # If TIME_EXIT_HOUR is set, stop new signals at the same hour.
+    # TIME_EXIT_HOUR already closes open trades; this ensures no new ones open after that.
+    _time_exit_hr = _s_early.get("TIME_EXIT_HOUR", config.TIME_EXIT_HOUR)
+    if _time_exit_hr and datetime.now().hour >= _time_exit_hr:
+        logger.info(
+            "Past TIME_EXIT_HOUR (%d:00) — no new signals to avoid afternoon theta decay.",
+            _time_exit_hr,
+        )
+        return
+
     # ── Step 1: collect valid zones for every TF ──────────────────────────
     valid_zones: dict[str, list] = {}
     recent_candles: dict[str, list] = {}
