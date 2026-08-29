@@ -41,10 +41,13 @@ def _load_all_trades() -> list[dict]:
     cur = conn.execute("""
         SELECT zone_class, zone_type, timeframe,
                entry, stop_loss, intraday_target,
-               result, exit_reason, pnl_points AS pnl,
-               time_signal, date
+               status,
+               COALESCE(result, sim_outcome)      AS effective_result,
+               COALESCE(pnl_points, sim_pnl_points) AS pnl,
+               CASE WHEN result IS NOT NULL THEN 'actual' ELSE 'simulated' END AS data_type,
+               exit_reason, time_signal, date
         FROM signals
-        WHERE result IS NOT NULL
+        WHERE result IS NOT NULL OR sim_outcome IS NOT NULL
         ORDER BY date ASC
     """)
     rows = [dict(r) for r in cur.fetchall()]
@@ -55,17 +58,21 @@ def _load_all_trades() -> list[dict]:
 # ── Aggregate stats ───────────────────────────────────────────────────────────
 
 def _aggregate(trades: list[dict]) -> dict:
-    total   = len(trades)
-    wins    = sum(1 for t in trades if t["result"] == "win")
-    losses  = sum(1 for t in trades if t["result"] == "loss")
-    win_rate = round(wins / total * 100, 1) if total else 0
+    actual    = [t for t in trades if t["data_type"] == "actual"]
+    simulated = [t for t in trades if t["data_type"] == "simulated"]
+    total     = len(trades)
 
-    # By zone type
+    def _wr(rows):
+        wins = sum(1 for t in rows if t["effective_result"] in ("win", "target"))
+        return round(wins / len(rows) * 100, 1) if rows else 0
+
+    # By zone type (combined actual + simulated)
     by_type: dict[str, dict] = defaultdict(lambda: {"wins": 0, "losses": 0, "pnl": 0.0})
     for t in trades:
         k = f"{t['zone_class'].upper()} {t['zone_type']}"
-        by_type[k]["wins"]   += 1 if t["result"] == "win" else 0
-        by_type[k]["losses"] += 1 if t["result"] == "loss" else 0
+        is_win = t["effective_result"] in ("win", "target")
+        by_type[k]["wins"]   += 1 if is_win else 0
+        by_type[k]["losses"] += 0 if is_win else 1
         by_type[k]["pnl"]    += t["pnl"] or 0
 
     type_summary = []
@@ -76,20 +83,20 @@ def _aggregate(trades: list[dict]) -> dict:
             f"  {k}: {n} trades, {wr}% WR, {v['pnl']:+.1f}pts PnL"
         )
 
-    # By exit reason
+    # By exit reason (actual trades only)
     by_exit: dict[str, int] = defaultdict(int)
-    for t in trades:
+    for t in actual:
         by_exit[t["exit_reason"] or "unknown"] += 1
-
     exit_summary = [f"  {k}: {v}" for k, v in sorted(by_exit.items(), key=lambda x: -x[1])]
 
-    # By time of day (hour of entry)
+    # By time of day (all signals — actual + simulated)
     by_hour: dict[int, dict] = defaultdict(lambda: {"wins": 0, "losses": 0})
     for t in trades:
         try:
-            h = int((t["time_signal"] or "09:15:00")[:2])
-            by_hour[h]["wins"]   += 1 if t["result"] == "win" else 0
-            by_hour[h]["losses"] += 1 if t["result"] == "loss" else 0
+            h   = int((t["time_signal"] or "09:15:00")[:2])
+            win = t["effective_result"] in ("win", "target")
+            by_hour[h]["wins"]   += 1 if win else 0
+            by_hour[h]["losses"] += 0 if win else 1
         except Exception:
             pass
 
@@ -98,21 +105,23 @@ def _aggregate(trades: list[dict]) -> dict:
         v  = by_hour[h]
         n  = v["wins"] + v["losses"]
         wr = round(v["wins"] / n * 100) if n else 0
-        hour_summary.append(f"  {h:02d}:xx  {n} trades  {wr}% WR")
+        hour_summary.append(f"  {h:02d}:xx  {n} signals  {wr}% WR")
 
     # By zone class
     demand_trades = [t for t in trades if t["zone_class"] == "demand"]
     supply_trades = [t for t in trades if t["zone_class"] == "supply"]
-    demand_wr = round(sum(1 for t in demand_trades if t["result"] == "win") / len(demand_trades) * 100) if demand_trades else 0
-    supply_wr = round(sum(1 for t in supply_trades if t["result"] == "win") / len(supply_trades) * 100) if supply_trades else 0
 
     return {
-        "summary":      f"{total} trades | {wins}W {losses}L | {win_rate}% WR",
-        "by_type":      "\n".join(type_summary) or "  (none)",
-        "by_exit":      "\n".join(exit_summary)  or "  (none)",
-        "by_hour":      "\n".join(hour_summary)  or "  (none)",
-        "demand_wr":    f"{len(demand_trades)} trades, {demand_wr}% WR",
-        "supply_wr":    f"{len(supply_trades)} trades, {supply_wr}% WR",
+        "summary":   (f"{total} signals total | "
+                      f"{len(actual)} actual trades ({_wr(actual)}% WR) | "
+                      f"{len(simulated)} simulated skipped ({_wr(simulated)}% WR)"),
+        "by_type":   "\n".join(type_summary) or "  (none)",
+        "by_exit":   "\n".join(exit_summary)  or "  (none)",
+        "by_hour":   "\n".join(hour_summary)  or "  (none)",
+        "demand_wr": f"{len(demand_trades)} signals, {_wr(demand_trades)}% WR",
+        "supply_wr": f"{len(supply_trades)} signals, {_wr(supply_trades)}% WR",
+        "actual_ct": len(actual),
+        "sim_ct":    len(simulated),
     }
 
 
@@ -134,7 +143,11 @@ def _build_prompt(agg: dict, knowledge: str, ext_knowledge: str, current_memory:
     today = datetime.today().strftime("%Y-%m-%d")
     return f"""You are seeding the long-term memory for a NIFTY intraday demand/supply zone options trading agent.
 
-HISTORICAL TRADE DATA (all closed trades in trades.db):
+HISTORICAL SIGNAL DATA ({agg['actual_ct']} actual trades + {agg['sim_ct']} simulated skipped signals):
+NOTE: "actual" = trades that were approved and closed. "simulated" = signals that were skipped/rejected
+but bar-by-bar simulated after EOD to see what would have happened. Both are used to avoid selection
+bias — learning only from trades you chose to take would miss patterns in what you skipped.
+
 Overall: {agg['summary']}
 
 By zone type:

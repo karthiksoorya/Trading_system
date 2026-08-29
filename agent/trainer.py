@@ -42,21 +42,40 @@ def _load_memory() -> dict:
 
 def _load_today_trades() -> list[dict]:
     sys.path.insert(0, str(_ROOT))
-    from journal.db import get_signals_for_date
-    rows = get_signals_for_date(date.today().isoformat())
-    return [dict(r) for r in rows if r["result"] is not None]
+    import sqlite3 as _sqlite3
+    import config as _config
+    conn = _sqlite3.connect(_config.DB_PATH)
+    conn.row_factory = _sqlite3.Row
+    cur = conn.execute("""
+        SELECT zone_class, zone_type, timeframe,
+               entry, stop_loss, intraday_target, status,
+               COALESCE(result, sim_outcome)         AS effective_result,
+               COALESCE(pnl_points, sim_pnl_points)  AS pnl_points,
+               CASE WHEN result IS NOT NULL THEN 'actual' ELSE 'simulated' END AS data_type,
+               exit_reason, time_signal
+        FROM signals
+        WHERE date = ?
+          AND (result IS NOT NULL OR sim_outcome IS NOT NULL)
+    """, (date.today().isoformat(),))
+    rows = [dict(r) for r in cur.fetchall()]
+    conn.close()
+    return rows
 
 
 def _build_prompt(trades: list[dict], memory: dict) -> str:
     if not trades:
-        trades_text = "No trades closed today."
+        trades_text = "No signals today (no closed trades or simulated outcomes)."
     else:
-        lines = []
+        actual_ct = sum(1 for t in trades if t["data_type"] == "actual")
+        sim_ct    = sum(1 for t in trades if t["data_type"] == "simulated")
+        lines     = [f"  ({actual_ct} actual trades + {sim_ct} simulated skipped signals)"]
         for t in trades:
+            tag = "[ACTUAL]" if t["data_type"] == "actual" else "[SIMULATED]"
             lines.append(
-                f"  [{t['zone_class'].upper()} {t['zone_type']} {t['timeframe']}]"
+                f"  {tag} [{t['zone_class'].upper()} {t['zone_type']} {t['timeframe']}]"
                 f"  Entry={t['entry']:.2f} SL={t['stop_loss']:.2f}"
-                f"  Result={t['result'].upper()} PnL={t.get('pnl_points', 0):+.1f}pts"
+                f"  Result={str(t.get('effective_result') or '?').upper()}"
+                f"  PnL={t.get('pnl_points', 0):+.1f}pts"
                 f"  ExitReason={t.get('exit_reason','?')}"
             )
         trades_text = "\n".join(lines)
@@ -64,7 +83,8 @@ def _build_prompt(trades: list[dict], memory: dict) -> str:
     today = date.today().isoformat()
     return f"""You are the daily trainer for a NIFTY demand/supply zone intraday options trading system.
 
-TODAY'S CLOSED TRADES:
+TODAY'S SIGNALS ([ACTUAL] = approved and closed, [SIMULATED] = skipped/rejected but bar-by-bar
+simulated after EOD. Use both to avoid selection bias — patterns in skipped signals matter too):
 {trades_text}
 
 CURRENT MEMORY:
