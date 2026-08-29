@@ -874,9 +874,11 @@ def run():
     import telegram_handler
     telegram_handler.start_polling()
 
-    # BUG 5 fix: removed every().day.at(SCAN_START) — the every(5).minutes job already
-    # fires at 10:05, so keeping both caused a double-scan and potential duplicate signals.
-    schedule.every(5).minutes.do(scan)
+    # BUG 5 fix: removed every().day.at(SCAN_START) — the interval job already
+    # fires at start, so keeping both caused a double-scan and potential duplicate signals.
+    _scan_every = max(1, int(config.SCAN_INTERVAL_MINUTES))
+    logger.info("Scan interval: every %d min", _scan_every)
+    schedule.every(_scan_every).minutes.do(scan)
     schedule.every(1).minutes.do(monitor_open_trades)
     schedule.every(1).minutes.do(check_pending_freshness)
     schedule.every().day.at("15:20").do(end_of_day)         # 10 min before close

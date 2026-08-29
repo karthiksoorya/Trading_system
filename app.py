@@ -552,6 +552,9 @@ with tab_engine:
             "MIN_RISK_POINTS":      _current.get("MIN_RISK_POINTS", config.MIN_RISK_POINTS),
             "ZONE_APPROACH_POINTS": _current.get("ZONE_APPROACH_POINTS", config.ZONE_APPROACH_POINTS),
             "MAX_TRADES_PER_DAY":   _current.get("MAX_TRADES_PER_DAY", config.MAX_TRADES_PER_DAY),
+            "AUTO_FIRST_TRADE":     _current.get("AUTO_FIRST_TRADE", False),
+            "AUTO_FIRST_COUNT":     _current.get("AUTO_FIRST_COUNT", config.AUTO_FIRST_COUNT),
+            "SCAN_INTERVAL_MINUTES": _current.get("SCAN_INTERVAL_MINUTES", config.SCAN_INTERVAL_MINUTES),
             "VIX_MAX":              _current.get("VIX_MAX", config.VIX_MAX),
             "TIME_EXIT_HOUR":       _current.get("TIME_EXIT_HOUR", config.TIME_EXIT_HOUR),
             "IV_RANK_MAX":          _current.get("IV_RANK_MAX", config.IV_RANK_MAX),
@@ -665,6 +668,14 @@ with tab_engine:
         min_value=10.0, max_value=40.0, step=0.5,
         value=float(_current.get("VIX_MAX", config.VIX_MAX)),
         help="Skip all scans when India VIX is above this. High VIX = inflated premiums.",
+    )
+
+    scan_interval = st.number_input(
+        "Scan interval (minutes) — restart engine to apply",
+        min_value=1, max_value=5, step=1,
+        value=int(_current.get("SCAN_INTERVAL_MINUTES", config.SCAN_INTERVAL_MINUTES)),
+        help="How often the engine re-checks for signals. 1 = react within ~1 min of "
+             "price reaching a zone (cuts signal-to-entry lag). 5 = old behaviour.",
     )
 
     st.markdown("**Scan Window** — restrict scanning to specific market hours (IST)")
@@ -819,6 +830,7 @@ with tab_engine:
                 "MIN_CONFLUENCE":        min_conf,
                 "MAX_TRADES_PER_DAY":    max_trades,
                 "VIX_MAX":               vix_max,
+                "SCAN_INTERVAL_MINUTES": scan_interval,
                 "SCAN_WINDOW":           {"start": scan_start_time, "end": scan_end_time},
                 "IV_RANK_MAX":           iv_rank_max,
                 "AUTO_FIRST_TRADE":      auto_first,

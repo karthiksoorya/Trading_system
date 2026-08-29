@@ -58,6 +58,10 @@ IV_RANK_MAX  = 60.0   # skip when IV Rank > 60% (set to 100 to disable)
 MARKET_OPEN  = "09:15"
 SCAN_START   = "10:15"   # FIX G: moved from 10:05 — avoids unreliable opening volatility zones
 MARKET_CLOSE = "15:30"
+# How often the engine re-scans for signals. 1 = react within ~1 min of price
+# reaching a zone (cuts the signal-to-entry lag). 5 = old behaviour. Engine
+# restart required to apply (it's set up once at startup).
+SCAN_INTERVAL_MINUTES = 1
 
 # ── Multi-Timeframe Config ─────────────────────────────────────────────────
 TF_HIGHER       = "60minute"   # demand/supply curve
@@ -161,6 +165,7 @@ MIN_CONFLUENCE        = _s.get("MIN_CONFLUENCE",         MIN_CONFLUENCE)
 MIN_RISK_POINTS       = _s.get("MIN_RISK_POINTS",        MIN_RISK_POINTS)
 MAX_TRADES_PER_DAY    = _s.get("MAX_TRADES_PER_DAY",    MAX_TRADES_PER_DAY)
 AUTO_FIRST_COUNT      = _s.get("AUTO_FIRST_COUNT",      AUTO_FIRST_COUNT)
+SCAN_INTERVAL_MINUTES = _s.get("SCAN_INTERVAL_MINUTES", SCAN_INTERVAL_MINUTES)
 VIX_MAX               = _s.get("VIX_MAX",               VIX_MAX)
 ZONE_APPROACH_POINTS  = _s.get("ZONE_APPROACH_POINTS",  ZONE_APPROACH_POINTS)
 SCAN_TIMEFRAMES       = _s.get("SCAN_TIMEFRAMES",       [TF_LOWER, TF_INTERMEDIATE, TF_HIGHER])
