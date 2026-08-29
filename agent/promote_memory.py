@@ -274,8 +274,11 @@ def promote(candidate_path: Path, force: bool = False) -> None:
             )
         print(f"Override logged to {_OVERRIDE_LOG}")
 
+    # Always require y/N confirmation, UNLESS the FORCE typed confirmation already ran
+    # (gate_failures AND force path). That way --force with all gates passing still asks.
+    already_force_confirmed = bool(gate_failures) and force
     print(f"\nThis will overwrite: {_MEMORY_PATH}")
-    if not force:
+    if not already_force_confirmed:
         confirm = input("Promote to live? [y/N] ").strip().lower()
         if confirm != "y":
             print("Aborted.")

@@ -893,16 +893,34 @@ def end_of_day():
 
 def _simulate_signal_outcome(signal: dict, candles: list) -> dict:
     """Bar-by-bar simulate what would have happened if this signal was approved.
-    Checks 5-min candles from signal time onward — first touch of target or SL wins.
-    Returns sim_outcome ('target'|'stoploss'|'eod') and sim_pnl in index points.
+
+    Entry fill confirmation: the first bar at or after signal time must have traded
+    through the entry price before we start tracking target/SL. If the entry price
+    never traded in that bar (e.g. signal fired mid-bar and price moved away), the
+    simulation returns 'unfilled' with 0 pnl — not counted as a win or loss.
+
+    Returns sim_outcome ('target'|'stoploss'|'eod'|'unfilled') and sim_pnl in points.
     """
-    sig_time = signal["time_signal"]          # "HH:MM:SS"
-    entry     = signal["entry"]
-    sl        = signal["stop_loss"]
-    target    = signal["intraday_target"]
+    sig_time   = signal["time_signal"]          # "HH:MM:SS"
+    entry      = signal["entry"]
+    sl         = signal["stop_loss"]
+    target     = signal["intraday_target"]
     zone_class = signal["zone_class"]
 
     relevant = [c for c in candles if c.timestamp.strftime("%H:%M:%S") >= sig_time]
+    if not relevant:
+        return {"sim_outcome": "unfilled", "sim_pnl": 0.0}
+
+    # Confirm the entry price traded in the first bar. For demand zones the price
+    # must dip to entry (limit buy); for supply zones it must rise to entry (limit sell).
+    first = relevant[0]
+    if zone_class == "demand":
+        filled = first.low <= entry
+    else:
+        filled = first.high >= entry
+
+    if not filled:
+        return {"sim_outcome": "unfilled", "sim_pnl": 0.0}
 
     for candle in relevant:
         if zone_class == "demand":
@@ -942,6 +960,10 @@ def eod_signal_review():
     simulated = []
     for sig in skipped:
         outcome = _simulate_signal_outcome(sig, candles)
+        if outcome["sim_outcome"] == "unfilled":
+            # Entry price never traded — no fill confirmation. Skip persisting; not valid training data.
+            logger.info("EOD review #%d %s — unfilled (entry %.2f never traded)", sig["id"], sig["zone_class"], sig["entry"])
+            continue
         simulated.append({**sig, **outcome})
         # Persist simulated outcome — ML training data for future model
         update_signal_sim_outcome(sig["id"], outcome["sim_outcome"], outcome["sim_pnl"])
