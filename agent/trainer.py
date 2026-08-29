@@ -151,6 +151,110 @@ CRITICAL RULES:
 Reply with ONLY the updated JSON object. No markdown, no explanation, no code fences. Raw JSON only."""
 
 
+def _update_hypothesis_tracker(memory: dict, today: str) -> dict:
+    """
+    For each testable hypothesis filter in agent/knowledge/*.json,
+    count today's signal matches and update win/loss tallies.
+    Promotes hypothesis status when 20+ signals have been tested.
+    """
+    import sqlite3 as _sq
+    from pathlib import Path as _Path
+
+    kb_dir  = Path(__file__).parent / "knowledge"
+    tracker = {k: v for k, v in memory.get("hypothesis_tracker", {}).items()}
+
+    try:
+        import config as _cfg
+        conn = _sq.connect(_cfg.DB_PATH)
+        conn.row_factory = _sq.Row
+
+        # Baseline WR for today (wins vs losses, neutral excluded)
+        baseline = conn.execute("""
+            SELECT
+                SUM(CASE WHEN COALESCE(result, sim_outcome) IN ('win','target')    THEN 1 ELSE 0 END) AS wins,
+                SUM(CASE WHEN COALESCE(result, sim_outcome) IN ('loss','stoploss') THEN 1 ELSE 0 END) AS losses
+            FROM signals
+            WHERE date = ? AND (result IS NOT NULL OR sim_outcome IS NOT NULL)
+        """, (today,)).fetchone()
+
+        b_wins   = baseline["wins"]   or 0
+        b_losses = baseline["losses"] or 0
+        b_total  = b_wins + b_losses
+        b_wr     = b_wins / b_total if b_total else 0.5
+
+        for kf in sorted(kb_dir.glob("*.json")):
+            try:
+                kd = json.loads(kf.read_text(encoding="utf-8"))
+            except Exception:
+                continue
+
+            slug    = kf.stem
+            filters = [sf for sf in kd.get("signal_filters", [])
+                       if sf.get("testable") and sf.get("filter")]
+            if not filters:
+                continue
+
+            if slug not in tracker:
+                tracker[slug] = {"source": kd.get("label", slug), "rules": []}
+
+            existing_rules = {r["rule"]: r for r in tracker[slug].get("rules", [])}
+
+            for sf in filters:
+                rule_text  = sf["rule"]
+                sql_filter = sf["filter"]
+                entry      = existing_rules.get(rule_text) or {
+                    "rule":           rule_text,
+                    "filter":         sql_filter,
+                    "signals_tested": 0,
+                    "wins":           0,
+                    "losses":         0,
+                    "status":         "untested",
+                }
+                try:
+                    row = conn.execute(f"""
+                        SELECT
+                            SUM(CASE WHEN COALESCE(result, sim_outcome) IN ('win','target')    THEN 1 ELSE 0 END) AS wins,
+                            SUM(CASE WHEN COALESCE(result, sim_outcome) IN ('loss','stoploss') THEN 1 ELSE 0 END) AS losses
+                        FROM signals
+                        WHERE date = ?
+                          AND (result IS NOT NULL OR sim_outcome IS NOT NULL)
+                          AND ({sql_filter})
+                    """, (today,)).fetchone()
+
+                    day_wins   = row["wins"]   or 0
+                    day_losses = row["losses"] or 0
+                    entry["signals_tested"] += day_wins + day_losses
+                    entry["wins"]           += day_wins
+                    entry["losses"]         += day_losses
+
+                    total = entry["signals_tested"]
+                    wins  = entry["wins"]
+                    dec   = wins + entry["losses"]
+                    wr    = wins / dec if dec else 0
+
+                    if total >= 20:
+                        if   wr >= b_wr + 0.10:  entry["status"] = "validated"
+                        elif wr <= b_wr - 0.10:  entry["status"] = "rejected"
+                        else:                     entry["status"] = "inconclusive"
+                    elif total >= 5:
+                        entry["status"] = "testing"
+                    else:
+                        entry["status"] = "untested"
+
+                except Exception as e:
+                    logger.debug("Hypothesis filter error for '%s': %s", rule_text, e)
+
+                existing_rules[rule_text] = entry
+
+            tracker[slug]["rules"] = list(existing_rules.values())
+
+        conn.close()
+    except Exception as e:
+        logger.warning("Hypothesis tracker update failed (non-fatal): %s", e)
+
+    return tracker
+
+
 def run() -> None:
     logger.info("=== Daily Trainer starting ===")
 
@@ -195,8 +299,21 @@ def run() -> None:
         logger.error("Claude returned invalid JSON: %s\nRaw: %.300s", e, raw)
         return
 
+    # Update hypothesis tracker with today's signal confirmations
+    today_str = date.today().isoformat()
+    updated["hypothesis_tracker"] = _update_hypothesis_tracker(updated, today_str)
+
+    validated = sum(
+        1 for src in updated["hypothesis_tracker"].values()
+        for r in src.get("rules", []) if r.get("status") == "validated"
+    )
+    rejected = sum(
+        1 for src in updated["hypothesis_tracker"].values()
+        for r in src.get("rules", []) if r.get("status") == "rejected"
+    )
+    logger.info("Hypothesis tracker: %d validated, %d rejected", validated, rejected)
+
     # Write CANDIDATE — never overwrite live memory directly
-    today_str     = date.today().isoformat()
     candidate_path = _AGENT_DIR / f"memory_candidate_{today_str}.json"
     candidate_path.write_text(json.dumps(updated, indent=2, ensure_ascii=False), encoding="utf-8")
 

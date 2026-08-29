@@ -2519,6 +2519,40 @@ with tab_agent:
 
     st.divider()
 
+    # ── Hypothesis tracker ─────────────────────────────────────────────────
+    st.subheader("🔬 Hypothesis Tracker")
+    st.caption("External rules are tested against live trade data. 20+ signals required to validate or reject.")
+
+    _ht = {}
+    if _MEM_PATH.exists():
+        try:
+            _ht = _json.loads(_MEM_PATH.read_text(encoding="utf-8")).get("hypothesis_tracker", {})
+        except Exception:
+            pass
+
+    if not _ht:
+        st.info("No hypotheses tracked yet. Ingest a source and run the trainer to populate.")
+    else:
+        _status_emoji = {"validated": "✅", "rejected": "❌", "testing": "🔄", "inconclusive": "⚠️", "untested": "◇"}
+        for _src_slug, _src in _ht.items():
+            rules = _src.get("rules", [])
+            if not rules:
+                continue
+            with st.expander(f"**{_src.get('source', _src_slug)}** — {len(rules)} testable rules"):
+                for _r in rules:
+                    _st  = _r.get("status", "untested")
+                    _tot = _r.get("signals_tested", 0)
+                    _w   = _r.get("wins", 0)
+                    _l   = _r.get("losses", 0)
+                    _wr  = round(_w / (_w + _l) * 100) if (_w + _l) else 0
+                    _em  = _status_emoji.get(_st, "◇")
+                    st.markdown(
+                        f"{_em} **{_st.upper()}** — {_r['rule']}  \n"
+                        f"  `{_tot} signals tested | {_w}W / {_l}L | {_wr}% WR`"
+                    )
+
+    st.divider()
+
     # ── Candidate memory promote ───────────────────────────────────────────
     st.subheader("📋 Candidate Memory Files")
     st.caption("Trainer and seeder write candidates — review before promoting to live memory.json.")

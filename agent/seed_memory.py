@@ -243,6 +243,97 @@ CRITICAL GUIDELINES:
 Reply with ONLY the updated JSON object. No markdown, no explanation. Raw JSON only."""
 
 
+# ── Hypothesis tracker seeding from full history ──────────────────────────────
+
+def _seed_hypothesis_tracker() -> dict:
+    """
+    Run all testable hypothesis filters against the full historical DB.
+    Returns a fully-populated hypothesis_tracker dict.
+    """
+    kb_dir = Path(__file__).parent / "knowledge"
+    tracker: dict = {}
+
+    if not _DB_PATH.exists():
+        return tracker
+
+    conn = sqlite3.connect(_DB_PATH)
+    conn.row_factory = sqlite3.Row
+
+    # Baseline WR across all historical data
+    baseline = conn.execute("""
+        SELECT
+            SUM(CASE WHEN COALESCE(result, sim_outcome) IN ('win','target')    THEN 1 ELSE 0 END) AS wins,
+            SUM(CASE WHEN COALESCE(result, sim_outcome) IN ('loss','stoploss') THEN 1 ELSE 0 END) AS losses
+        FROM signals
+        WHERE result IS NOT NULL OR sim_outcome IS NOT NULL
+    """).fetchone()
+
+    b_wins  = baseline["wins"]   or 0
+    b_losses = baseline["losses"] or 0
+    b_wr    = b_wins / (b_wins + b_losses) if (b_wins + b_losses) else 0.5
+    logger.info("Historical baseline WR: %.1f%% (%d wins / %d losses)", b_wr * 100, b_wins, b_losses)
+
+    for kf in sorted(kb_dir.glob("*.json")):
+        try:
+            kd = json.loads(kf.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+
+        slug    = kf.stem
+        filters = [sf for sf in kd.get("signal_filters", [])
+                   if sf.get("testable") and sf.get("filter")]
+        if not filters:
+            continue
+
+        tracker[slug] = {"source": kd.get("label", slug), "rules": []}
+        logger.info("Testing %d filters for: %s", len(filters), kd.get("label", slug))
+
+        for sf in filters:
+            rule_text  = sf["rule"]
+            sql_filter = sf["filter"]
+            try:
+                row = conn.execute(f"""
+                    SELECT
+                        SUM(CASE WHEN COALESCE(result, sim_outcome) IN ('win','target')    THEN 1 ELSE 0 END) AS wins,
+                        SUM(CASE WHEN COALESCE(result, sim_outcome) IN ('loss','stoploss') THEN 1 ELSE 0 END) AS losses
+                    FROM signals
+                    WHERE (result IS NOT NULL OR sim_outcome IS NOT NULL)
+                      AND ({sql_filter})
+                """).fetchone()
+
+                wins   = row["wins"]   or 0
+                losses = row["losses"] or 0
+                total  = wins + losses
+                wr     = wins / total if total else 0
+
+                if total >= 20:
+                    if   wr >= b_wr + 0.10:  status = "validated"
+                    elif wr <= b_wr - 0.10:  status = "rejected"
+                    else:                     status = "inconclusive"
+                elif total >= 5:
+                    status = "testing"
+                else:
+                    status = "untested"
+
+                logger.info(
+                    "  [%s] %s | %d tested, %d W/%d L, WR=%.0f%% vs baseline %.0f%%",
+                    status.upper(), rule_text[:60], total, wins, losses, wr*100, b_wr*100
+                )
+                tracker[slug]["rules"].append({
+                    "rule":           rule_text,
+                    "filter":         sql_filter,
+                    "signals_tested": total,
+                    "wins":           wins,
+                    "losses":         losses,
+                    "status":         status,
+                })
+            except Exception as e:
+                logger.warning("Filter error for '%s': %s", rule_text[:40], e)
+
+    conn.close()
+    return tracker
+
+
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 def run() -> None:
@@ -286,9 +377,9 @@ def run() -> None:
         logger.info("Aborted.")
         return
 
-    # Load ingested external knowledge
+    # Load ingested external knowledge (pass current memory for validation status)
     from agent.ingest import load_all_knowledge
-    ext_knowledge = load_all_knowledge()
+    ext_knowledge = load_all_knowledge(current_memory)
     logger.info("External knowledge: %d chars", len(ext_knowledge))
 
     prompt = _build_prompt(agg, knowledge, ext_knowledge, current_memory)
@@ -312,14 +403,29 @@ def run() -> None:
         logger.error("Claude returned invalid JSON: %s\nRaw: %.400s", e, raw)
         return
 
+    # Seed hypothesis tracker from full historical data
+    logger.info("Seeding hypothesis tracker from historical data ...")
+    updated["hypothesis_tracker"] = _seed_hypothesis_tracker()
+
+    validated = sum(
+        1 for src in updated["hypothesis_tracker"].values()
+        for r in src.get("rules", []) if r.get("status") == "validated"
+    )
+    rejected = sum(
+        1 for src in updated["hypothesis_tracker"].values()
+        for r in src.get("rules", []) if r.get("status") == "rejected"
+    )
+
     candidate_path.write_text(json.dumps(updated, indent=2, ensure_ascii=False), encoding="utf-8")
     logger.info("Candidate written → %s", candidate_path)
     logger.info(
-        "Regime: %s | Cautions: %d | Mistakes: %d | Win patterns: %d",
+        "Regime: %s | Cautions: %d | Mistakes: %d | Win patterns: %d | "
+        "Hypotheses validated: %d | rejected: %d",
         updated.get("market_regime"),
         len(updated.get("caution_flags", [])),
         len(updated.get("mistake_log", [])),
         len(updated.get("win_patterns", [])),
+        validated, rejected,
     )
     logger.info("=== Seeder complete — review candidate, then run promote_memory.py ===")
 

@@ -56,12 +56,29 @@ def promote(candidate_path: Path, force: bool = False) -> None:
     if _MEMORY_PATH.exists():
         old_memory = _load_json(_MEMORY_PATH)
 
+    # Hypothesis tracker summary
+    ht = new_memory.get("hypothesis_tracker", {})
+    h_validated   = sum(1 for s in ht.values() for r in s.get("rules",[]) if r.get("status")=="validated")
+    h_rejected    = sum(1 for s in ht.values() for r in s.get("rules",[]) if r.get("status")=="rejected")
+    h_testing     = sum(1 for s in ht.values() for r in s.get("rules",[]) if r.get("status")=="testing")
+    h_untested    = sum(1 for s in ht.values() for r in s.get("rules",[]) if r.get("status")=="untested")
+
     print(f"\nCandidate : {candidate_path.name}")
     print(f"Trained   : {new_memory.get('last_trained', '?')}")
     print(f"Regime    : {new_memory.get('market_regime', '?')}")
     print(f"Mistakes  : {len(new_memory.get('mistake_log', []))} entries")
     print(f"Wins      : {len(new_memory.get('win_patterns', []))} entries")
     print(f"Cautions  : {len(new_memory.get('caution_flags', []))} entries")
+    print(f"\nHypothesis tracker: ✅ {h_validated} validated | ❌ {h_rejected} rejected | "
+          f"🔄 {h_testing} testing | ◇ {h_untested} untested")
+    if h_validated:
+        print("  Validated rules:")
+        for s in ht.values():
+            for r in s.get("rules", []):
+                if r.get("status") == "validated":
+                    w, l = r.get("wins",0), r.get("losses",0)
+                    wr = round(w/(w+l)*100) if (w+l) else 0
+                    print(f"    ✅ {r['rule']} ({r.get('signals_tested',0)} signals, {wr}% WR)")
     print(f"\nChanges vs live memory.json:")
     print(_diff_summary(old_memory, new_memory))
 
