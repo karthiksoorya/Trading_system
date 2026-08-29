@@ -138,6 +138,20 @@ def _within_market_hours() -> bool:
     return is_market_open()
 
 
+def _run_agent_eval(signal, zone, vix: float | None) -> dict:
+    """Call agent evaluator. Returns TRADE on any failure — never silently blocks signals."""
+    try:
+        from agent.evaluator import evaluate
+        return evaluate(
+            signal.as_dict(),
+            {"departure_strength": zone.departure_strength, "base_compression": zone.base_compression},
+            vix,
+        )
+    except Exception as e:
+        logger.debug("Agent evaluator error — returning TRADE: %s", e)
+        return {"verdict": "TRADE", "reason": "evaluator error"}
+
+
 def scan():
     if not is_market_open():
         logger.info("Outside market hours — skipping scan.")
@@ -430,6 +444,14 @@ def _scan_core():
 
             data = {**signal.as_dict(), "position_size": sizing["position_size"], "date": trade_date}
             sig_id = log_signal(data)
+
+            # ── Agent evaluation ──────────────────────────────────────────
+            _agent = _run_agent_eval(signal, zone, vix)
+            if _agent["verdict"] == "SKIP":
+                logger.info("[%s] Agent SKIP — %s", tf, _agent["reason"])
+                continue
+            _agent_note = _agent["reason"] if _agent["verdict"] == "REVIEW" else None
+
             logger.info(
                 "[%s] SIGNAL #%d | %s %s | Score %.1f | Confluence %d TF (%s) | "
                 "Entry %.2f | SL %.2f | TGT %.2f",
@@ -508,6 +530,7 @@ def _scan_core():
                         confluence=signal.confluence.label(),
                         strike=_strike_display, opt_type=_opt_type,
                         delta=_delta, vix=vix, iv_rank=_iv_rank,
+                        agent_note=_agent_note,
                     )
             else:
                 # ── Normal flow: send Telegram notification for manual approval ──
@@ -523,6 +546,7 @@ def _scan_core():
                     confluence=signal.confluence.label(),
                     strike=_strike_display, opt_type=_opt_type,
                     delta=_delta, vix=vix, iv_rank=_iv_rank,
+                    agent_note=_agent_note,
                 )
 
 

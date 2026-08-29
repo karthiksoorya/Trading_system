@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "last_trained": null,
+  "market_regime": "normal",
+  "departure_thresholds": {
+    "min": 1.0,
+    "preferred": 1.5
+  },
+  "time_of_day_rules": {
+    "prefer_before": "11:30",
+    "avoid_after": "13:00"
+  },
+  "zone_type_notes": {},
+  "mistake_log": [],
+  "win_patterns": [],
+  "caution_flags": []
+}

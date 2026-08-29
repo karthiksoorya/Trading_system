@@ -38,7 +38,8 @@ def signal_detected(signal_id: int, zone_class: str, zone_type: str,
                     target: float, score: float, confluence: str,
                     strike: int = 0, opt_type: str = "",
                     delta: float = 0.0, vix: float = 0.0,
-                    iv_rank: float | None = None):
+                    iv_rank: float | None = None,
+                    agent_note: str | None = None):
     from datetime import datetime, date, timedelta
     emoji     = "🟢" if zone_class == "demand" else "🔴"
     direction = "LONG" if zone_class == "demand" else "SHORT"
@@ -71,12 +72,14 @@ def signal_detected(signal_id: int, zone_class: str, zone_type: str,
             f"Delta: {delta:+.2f} | VIX: {vix_str}{iv_warn}{rank_str}"
         )
 
+    agent_line = f"\n🤖 REVIEW: {agent_note}" if agent_note else ""
     text = (
         f"{emoji} <b>Signal #{signal_id} — {direction}</b>  🕐 {now}\n"
         f"{zone_type} | {timeframe}\n"
         f"Entry: {entry:.2f} | SL: {sl:.2f} | TGT: {target:.2f}\n"
         f"Score: {score:.1f}/10 | {confluence}"
         f"{options_note}"
+        f"{agent_line}"
         f"{expiry_note}"
     )
     keyboard = {
