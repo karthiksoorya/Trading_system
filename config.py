@@ -79,6 +79,7 @@ ZONE_APPROACH_POINTS   = 50   # LTP must be within this many pts of proximal
 #   lock in profit by exiting. e.g. 30 → exit when CE/PE is up 30%.
 #   Set to 0 to disable.
 OPTIONS_TRAIL_PCT   = 30    # exit when options up 30% from entry premium
+OPTIONS_SL_PCT      = 20   # exit when options down 20% from entry premium (0 = disabled)
 #
 # TIME_EXIT_HOUR: close any open trade at this hour (24h) if index target
 #   not yet hit. Prevents theta decay from eating gains in the afternoon.
@@ -152,3 +153,4 @@ ZONE_APPROACH_POINTS  = _s.get("ZONE_APPROACH_POINTS",  ZONE_APPROACH_POINTS)
 SCAN_TIMEFRAMES       = _s.get("SCAN_TIMEFRAMES",       [TF_LOWER, TF_INTERMEDIATE, TF_HIGHER])
 SCAN_ZONE_CLASSES     = _s.get("SCAN_ZONE_CLASSES",     ["demand", "supply"])
 DAILY_OPTIONS_TARGET  = _s.get("DAILY_OPTIONS_TARGET",  DAILY_OPTIONS_TARGET)
+OPTIONS_SL_PCT        = _s.get("OPTIONS_SL_PCT",         OPTIONS_SL_PCT)

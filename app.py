@@ -634,6 +634,32 @@ with tab_engine:
     st.caption("Set 09:15 → 15:25 to scan all day. Example: set 10:00 → 14:59 to skip 12:xx chop.")
 
     st.divider()
+    st.subheader("Options Exit Rules")
+    st.caption(
+        "Both rules watch the live options premium every scan cycle — "
+        "independent of where the Nifty index is."
+    )
+    _opt_cols = st.columns(2)
+    options_trail_pct = _opt_cols[0].number_input(
+        "Profit lock — exit when options up (%)",
+        min_value=0, max_value=100, step=5,
+        value=int(_current.get("OPTIONS_TRAIL_PCT", config.OPTIONS_TRAIL_PCT)),
+        help="Exit when options premium has gained this % from entry. 0 = disabled. Default 30.",
+    )
+    options_sl_pct = _opt_cols[1].number_input(
+        "Loss cut — exit when options down (%)",
+        min_value=0, max_value=100, step=5,
+        value=int(_current.get("OPTIONS_SL_PCT", config.OPTIONS_SL_PCT)),
+        help="Exit when options premium has fallen this % from entry. 0 = disabled. Default 20.",
+    )
+    time_exit_hour = st.number_input(
+        "Stop new signals & close open trades at hour (0 = disabled)",
+        min_value=0, max_value=15, step=1,
+        value=int(_current.get("TIME_EXIT_HOUR", config.TIME_EXIT_HOUR)),
+        help="e.g. 13 = close any open trade at 13:00 and stop new signals after that. Prevents afternoon theta decay.",
+    )
+
+    st.divider()
     st.subheader("IV Rank Filter")
     st.caption(
         "IV Rank = where today's VIX sits within its 52-week range (0% = cheapest, 100% = most expensive). "
@@ -740,6 +766,9 @@ with tab_engine:
                 "AUTO_FIRST_TRADE":      auto_first,
                 "FULLY_AUTOMATED":       fully_auto,
                 "DAILY_OPTIONS_TARGET":  daily_opts_target,
+                "OPTIONS_TRAIL_PCT":     options_trail_pct,
+                "OPTIONS_SL_PCT":        options_sl_pct,
+                "TIME_EXIT_HOUR":        time_exit_hour,
             })
             st.success(
                 f"Saved — TF: {entry_tf} | Score ≥ {min_score} | "

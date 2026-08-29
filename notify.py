@@ -143,6 +143,17 @@ def options_trail_exit(signal_id: int, entry_premium: float, current_premium: fl
     )
 
 
+def options_sl_exit(signal_id: int, entry_premium: float, current_premium: float,
+                    loss_pct: float, options_pnl: float):
+    """Fired when options premium has dropped >= OPTIONS_SL_PCT from entry."""
+    _send(
+        f"🛑 <b>Trade #{signal_id} — Options Stop Loss</b>\n"
+        f"Premium: ₹{entry_premium:.2f} → ₹{current_premium:.2f} (−{loss_pct:.1f}%)\n"
+        f"Options P&L: ₹{options_pnl:+.0f}\n"
+        f"Cutting loss — index zone may be valid but premium has decayed too much."
+    )
+
+
 def time_exit(signal_id: int, hour: int, options_pnl: float | None):
     """Fired when TIME_EXIT_HOUR is reached and trade is still open."""
     pnl_str = f" | Options P&L: ₹{options_pnl:+.0f}" if options_pnl is not None else ""

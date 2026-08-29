@@ -574,8 +574,9 @@ def monitor_open_trades():
     """Check all approved open trades against current LTP. Auto-exit on:
     1. Index target hit
     2. Index SL hit
-    3. Options premium up >= OPTIONS_TRAIL_PCT (theta protection)
-    4. Time exit at TIME_EXIT_HOUR (afternoon theta cutoff)
+    3. Options premium up >= OPTIONS_TRAIL_PCT (profit lock)
+    4. Options premium down >= OPTIONS_SL_PCT (loss cut)
+    5. Time exit at TIME_EXIT_HOUR (afternoon theta cutoff)
     """
     open_trades = get_open_trades()
     if not open_trades:
@@ -589,6 +590,7 @@ def monitor_open_trades():
 
     _s            = config.load_settings()
     trail_pct     = _s.get("OPTIONS_TRAIL_PCT", config.OPTIONS_TRAIL_PCT)
+    options_sl_pct = _s.get("OPTIONS_SL_PCT",   config.OPTIONS_SL_PCT)
     time_exit_hr  = _s.get("TIME_EXIT_HOUR",    config.TIME_EXIT_HOUR)
     now_hour      = datetime.now().hour
     now_minute    = datetime.now().minute
@@ -636,7 +638,20 @@ def monitor_open_trades():
                 close_reason, close_price = "options_trail", ltp
                 closed = True
 
-        # ── 3. Time exit ─────────────────────────────────────────────────
+        # ── 3. Options SL — cut loss when premium drops too far ──────────
+        if not close_reason and options_sl_pct > 0 and entry_premium > 0 and current_premium:
+            loss_pct = (entry_premium - current_premium) / entry_premium * 100
+            if loss_pct >= options_sl_pct:
+                opts_pnl = _calc_options_pnl(entry_premium, current_premium, lot_size)
+                logger.info(
+                    "OPTIONS SL EXIT #%d — premium %.2f→%.2f (−%.1f%%) options P&L ₹%.0f",
+                    tid, entry_premium, current_premium, loss_pct, opts_pnl,
+                )
+                notify.options_sl_exit(tid, entry_premium, current_premium, loss_pct, opts_pnl)
+                close_reason, close_price = "options_sl", ltp
+                closed = True
+
+        # ── 4. Time exit ─────────────────────────────────────────────────
         if not close_reason and time_exit_hr > 0 and now_hour >= time_exit_hr and now_minute == 0:
             opts_pnl = _calc_options_pnl(entry_premium, current_premium, lot_size) \
                        if (entry_premium > 0 and current_premium) else None
