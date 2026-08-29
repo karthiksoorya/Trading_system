@@ -254,6 +254,7 @@ def _scan_core():
     disabled_zone_types = set(_s.get("DISABLED_ZONE_TYPES", []))
     entry_tf            = _s.get("ENTRY_TIMEFRAME",        config.TF_LOWER)
     _auto_first         = _s.get("AUTO_FIRST_TRADE",       False)
+    _auto_first_n       = _s.get("AUTO_FIRST_COUNT",       config.AUTO_FIRST_COUNT)
 
     # ── Scan window filter ────────────────────────────────────────────────
     _win    = _s.get("SCAN_WINDOW", {"start": "09:15", "end": "10:30"})
@@ -453,11 +454,12 @@ def _scan_core():
             _fully_auto    = _s.get("FULLY_AUTOMATED", False)
             _no_open_trade = not get_open_trades()
             _do_auto       = _no_open_trade and (
-                _fully_auto or (_auto_first and trades_today() == 0)
+                _fully_auto or (_auto_first and trades_today() < _auto_first_n)
             )
 
             if _do_auto:
-                _auto_label = "FULLY-AUTO" if _fully_auto else "AUTO-FIRST"
+                _auto_label = ("FULLY-AUTO" if _fully_auto
+                               else f"AUTO-FIRST {trades_today() + 1}/{_auto_first_n}")
                 logger.info("%s: attempting signal #%d", _auto_label, sig_id)
                 _auto_ok = False
                 if _s.get("MODE") == "live":

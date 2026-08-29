@@ -31,7 +31,8 @@ MAX_RISK_PCT         = 0.01      # 1% of capital per day → ₹1,000
 # Aug 29 2026 — 3-year backtest: only take a few very high-quality trades.
 # demand/CE had negative 3y expectancy → PE only. Booster score alone isn't a
 # good quality proxy; confluence 3 + tight approach + a min-risk floor is.
-MAX_TRADES_PER_DAY   = 2        # hard daily cap (real frequency at this quality bar is ~1/month)
+MAX_TRADES_PER_DAY   = 3        # hard daily cap (real frequency at this quality bar is ~1/month)
+AUTO_FIRST_COUNT     = 2        # when AUTO_FIRST_TRADE is on, auto-execute this many trades/day
 MIN_BOOSTER_SCORE    = 10       # perfect setups only (all 4 boosters maxed)
 MIN_CONFLUENCE       = 3        # all 3 timeframes must agree (5m zone nested in 15m nested in 60m)
 MIN_RISK_POINTS      = 15       # skip signals whose |entry - SL| is below this (noise-floor zones)
@@ -159,6 +160,7 @@ MIN_BOOSTER_SCORE     = _s.get("MIN_BOOSTER_SCORE",     MIN_BOOSTER_SCORE)
 MIN_CONFLUENCE        = _s.get("MIN_CONFLUENCE",         MIN_CONFLUENCE)
 MIN_RISK_POINTS       = _s.get("MIN_RISK_POINTS",        MIN_RISK_POINTS)
 MAX_TRADES_PER_DAY    = _s.get("MAX_TRADES_PER_DAY",    MAX_TRADES_PER_DAY)
+AUTO_FIRST_COUNT      = _s.get("AUTO_FIRST_COUNT",      AUTO_FIRST_COUNT)
 VIX_MAX               = _s.get("VIX_MAX",               VIX_MAX)
 ZONE_APPROACH_POINTS  = _s.get("ZONE_APPROACH_POINTS",  ZONE_APPROACH_POINTS)
 SCAN_TIMEFRAMES       = _s.get("SCAN_TIMEFRAMES",       [TF_LOWER, TF_INTERMEDIATE, TF_HIGHER])

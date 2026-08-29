@@ -729,21 +729,29 @@ with tab_engine:
     _iv_rank_cols[2].metric("🔴 Rich IV", "> 60%", "IV crush risk")
 
     st.divider()
-    st.subheader("Auto-Trade First Signal")
-    auto_first = st.toggle(
-        "🤖 Auto-execute first trade of the day",
+    st.subheader("Auto-Trade First Signals")
+    _af_cols = st.columns([2, 1])
+    auto_first = _af_cols[0].toggle(
+        "🤖 Auto-execute the first trades of the day",
         value=_current.get("AUTO_FIRST_TRADE", False),
         help=(
-            "When ON: the first qualifying signal each day is approved and ordered automatically — "
-            "no Telegram button press needed. If target or SL hits, the system exits automatically. "
-            "All subsequent signals still require your manual approval."
+            "When ON: the first N qualifying signals each day are approved and ordered "
+            "automatically — no Telegram button press needed. This also removes the "
+            "approval-latency loss (backtest: tapping Approve 2-5 min late destroys the edge). "
+            "Signals beyond N still require your manual approval."
         ),
+    )
+    auto_first_count = _af_cols[1].number_input(
+        "How many",
+        min_value=1, max_value=10, step=1,
+        value=int(_current.get("AUTO_FIRST_COUNT", config.AUTO_FIRST_COUNT)),
+        disabled=not auto_first,
     )
     if auto_first:
         st.info(
-            "🤖 **Auto-trade ON** — first signal today will be placed automatically on Kite. "
-            "You will receive a Telegram notification when it executes. "
-            "Remaining signals still need your approval.",
+            f"🤖 **Auto-trade ON** — the first **{auto_first_count}** signal(s) today are placed "
+            "automatically on Kite. Telegram notifies you when each executes. "
+            "Signals after that still need your approval.",
             icon="🤖",
         )
     else:
@@ -814,6 +822,7 @@ with tab_engine:
                 "SCAN_WINDOW":           {"start": scan_start_time, "end": scan_end_time},
                 "IV_RANK_MAX":           iv_rank_max,
                 "AUTO_FIRST_TRADE":      auto_first,
+                "AUTO_FIRST_COUNT":      auto_first_count,
                 "FULLY_AUTOMATED":       fully_auto,
                 "DAILY_OPTIONS_TARGET":  daily_opts_target,
                 "OPTIONS_TRAIL_PCT":     options_trail_pct,
