@@ -2654,6 +2654,34 @@ with tab_agent:
     st.caption("Trainer and seeder write candidates — review before promoting to live memory.json.")
 
     _candidates = sorted(_AGENT_DIR.glob("memory_candidate_*.json"), reverse=True)
+    # Load shadow log for all candidates
+    _SHADOW_LOG_PATH = _AGENT_DIR / "shadow_log.jsonl"
+    _MIN_SHADOW_DAYS = 3
+
+    def _load_shadow_stats(candidate_date: str) -> dict:
+        if not _SHADOW_LOG_PATH.exists():
+            return {"days": 0, "total": 0, "divergences": 0, "agree_rate": 0,
+                    "shadow_skips": 0, "skip_wr": None}
+        entries = []
+        try:
+            for line in _SHADOW_LOG_PATH.read_text(encoding="utf-8").splitlines():
+                if not line.strip():
+                    continue
+                e = _json.loads(line)
+                if e.get("candidate_date") == candidate_date:
+                    entries.append(e)
+        except Exception:
+            return {"days": 0, "total": 0, "divergences": 0, "agree_rate": 0,
+                    "shadow_skips": 0, "skip_wr": None}
+        days        = len({e["date"] for e in entries})
+        total       = len(entries)
+        divergences = sum(1 for e in entries if e["live_verdict"] != e["shadow_verdict"])
+        agree_rate  = round((total - divergences) / total * 100, 1) if total else 0
+        shadow_skips = sum(1 for e in entries
+                           if e["shadow_verdict"] == "SKIP" and e["live_verdict"] != "SKIP")
+        return {"days": days, "total": total, "divergences": divergences,
+                "agree_rate": agree_rate, "shadow_skips": shadow_skips, "skip_wr": None}
+
     if not _candidates:
         st.info("No candidate files yet. Candidates appear after trainer.py or seed_memory.py runs.")
     else:
@@ -2662,21 +2690,58 @@ with tab_agent:
                 _cd = _json.loads(_cand.read_text(encoding="utf-8"))
             except Exception:
                 continue
-            with st.expander(f"**{_cand.name}** — trained: {_cd.get('last_trained','?')}, regime: {_cd.get('market_regime','?')}"):
-                _cc1, _cc2, _cc3 = st.columns(3)
-                _cc1.metric("Mistakes",   len(_cd.get("mistake_log", [])))
-                _cc2.metric("Wins",       len(_cd.get("win_patterns", [])))
-                _cc3.metric("Cautions",   len(_cd.get("caution_flags", [])))
+
+            _cdate  = _cand.stem.replace("memory_candidate_", "")
+            _shadow = _load_shadow_stats(_cdate)
+            _days_ok = _shadow["days"] >= _MIN_SHADOW_DAYS
+            _gate_label = (f"✅ {_shadow['days']}/{_MIN_SHADOW_DAYS} shadow days — ready to promote"
+                           if _days_ok else
+                           f"⏳ {_shadow['days']}/{_MIN_SHADOW_DAYS} shadow days — accumulating")
+
+            with st.expander(
+                f"**{_cand.name}** | trained: {_cd.get('last_trained','?')} | "
+                f"regime: {_cd.get('market_regime','?')} | {_gate_label}"
+            ):
+                _cc1, _cc2, _cc3, _cc4, _cc5 = st.columns(5)
+                _cc1.metric("Mistakes",     len(_cd.get("mistake_log", [])))
+                _cc2.metric("Wins",         len(_cd.get("win_patterns", [])))
+                _cc3.metric("Cautions",     len(_cd.get("caution_flags", [])))
+                _cc4.metric("Shadow days",  f"{_shadow['days']}/{_MIN_SHADOW_DAYS}")
+                _cc5.metric("Agreement",    f"{_shadow['agree_rate']}%" if _shadow["total"] else "—")
+
+                if _shadow["total"]:
+                    st.caption(
+                        f"Shadow: {_shadow['total']} signals | "
+                        f"{_shadow['divergences']} divergences | "
+                        f"{_shadow['shadow_skips']} shadow-only SKIPs"
+                    )
+                else:
+                    st.caption("Shadow log empty — scheduler will populate it as live signals arrive.")
+
+                if not _days_ok:
+                    st.warning(
+                        f"Promotion gated: need {_MIN_SHADOW_DAYS - _shadow['days']} more "
+                        f"trading day(s) of shadow data. Use **--force** from terminal to bypass."
+                    )
+
                 with st.expander("Raw candidate JSON"):
                     st.json(_cd)
+
                 _col_promote, _col_discard = st.columns(2)
-                if _col_promote.button(f"✅ Promote to Live", key=f"promote_{_cand.stem}", type="primary"):
+                _promote_disabled = not _days_ok
+                if _col_promote.button(
+                    f"{'✅' if _days_ok else '🔒'} Promote to Live",
+                    key=f"promote_{_cand.stem}",
+                    type="primary",
+                    disabled=_promote_disabled,
+                    help="Promotion requires 3 shadow trading days. Use --force from terminal to bypass.",
+                ):
                     try:
                         import subprocess as _sp
                         import sys as _sys
                         _pr = _sp.run(
                             [_sys.executable, str(_AGENT_DIR / "promote_memory.py"),
-                             "--date", _cand.stem.replace("memory_candidate_", ""), "--force"],
+                             "--date", _cdate, "--force"],
                             capture_output=True, text=True,
                             cwd=str(_Path(__file__).parent),
                         )
@@ -2687,7 +2752,7 @@ with tab_agent:
                         st.rerun()
                     except Exception as _e:
                         st.error(f"Promote failed: {_e}")
-                if _col_discard.button(f"🗑️ Discard Candidate", key=f"discard_{_cand.stem}"):
+                if _col_discard.button(f"🗑️ Discard", key=f"discard_{_cand.stem}"):
                     _cand.unlink()
                     st.success("Discarded.")
                     st.rerun()

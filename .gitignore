@@ -197,3 +197,11 @@ gdrive_credentials.json
 gdrive_token.json
 SYSTEM_LOCAL.md
 AGENT_KNOWLEDGE.md
+
+# Agent runtime files (machine-specific, not shared)
+agent/memory.json
+agent/memory_candidate_*.json
+agent/memory_archive/
+agent/shadow_log.jsonl
+agent/eval_log.jsonl
+agent/knowledge/

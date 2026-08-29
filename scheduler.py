@@ -152,6 +152,66 @@ def _run_agent_eval(signal, zone, vix: float | None) -> dict:
         return {"verdict": "TRADE", "reason": "evaluator error"}
 
 
+def _run_shadow_eval(signal, zone, vix: float | None, sig_id: int, live_verdict: str) -> None:
+    """
+    Evaluate the same signal using the candidate memory (if any exists) and log the result.
+    Called for EVERY signal — including ones the live agent SKIP'd — so we accumulate
+    enough data to validate the candidate before promoting it.
+    The shadow result is logged to agent/shadow_log.jsonl and never affects live decisions.
+    """
+    import json as _json
+    from datetime import datetime as _dt
+    from pathlib import Path as _Path
+
+    agent_dir  = _Path(__file__).parent / "agent"
+    candidates = sorted(agent_dir.glob("memory_candidate_*.json"), reverse=True)
+    if not candidates:
+        return
+
+    candidate_path = candidates[0]
+    candidate_date = candidate_path.stem.replace("memory_candidate_", "")
+
+    try:
+        candidate_mem = _json.loads(candidate_path.read_text(encoding="utf-8"))
+    except Exception as e:
+        logger.debug("Shadow eval: could not load candidate: %s", e)
+        return
+
+    try:
+        from agent.evaluator import evaluate_with_memory as _eshadow
+        shadow = _eshadow(
+            signal.as_dict(),
+            {"departure_strength": getattr(zone, "departure_strength", None),
+             "base_compression":   getattr(zone, "base_compression", None)},
+            vix,
+            candidate_mem,
+        )
+    except Exception as e:
+        logger.debug("Shadow eval failed: %s", e)
+        return
+
+    entry = {
+        "ts":             _dt.now().isoformat(timespec="seconds"),
+        "date":           _dt.now().strftime("%Y-%m-%d"),
+        "candidate_date": candidate_date,
+        "signal_id":      sig_id,
+        "signal_key":     (f"{signal.zone.zone_class}_{signal.zone.zone_type}"
+                           f"_{signal.zone.timeframe}"),
+        "live_verdict":   live_verdict,
+        "shadow_verdict": shadow["verdict"],
+        "shadow_reason":  shadow["reason"],
+    }
+    try:
+        shadow_log = agent_dir / "shadow_log.jsonl"
+        with shadow_log.open("a", encoding="utf-8") as f:
+            f.write(_json.dumps(entry) + "\n")
+        if shadow["verdict"] != live_verdict:
+            logger.info("[SHADOW] Signal #%d: live=%s shadow=%s — %s",
+                        sig_id, live_verdict, shadow["verdict"], shadow["reason"])
+    except Exception as e:
+        logger.debug("Shadow log write failed: %s", e)
+
+
 def scan():
     if not is_market_open():
         logger.info("Outside market hours — skipping scan.")
@@ -455,6 +515,11 @@ def _scan_core():
             # ── Agent evaluation ──────────────────────────────────────────
             _agent = _run_agent_eval(signal, zone, vix)
             update_signal_agent_verdict(sig_id, _agent["verdict"], _agent["reason"])
+
+            # Shadow eval with candidate memory (non-blocking, logged only)
+            # Runs BEFORE the SKIP gate so it captures every signal including SKIP'd ones
+            _run_shadow_eval(signal, zone, vix, sig_id, _agent["verdict"])
+
             if _agent["verdict"] == "SKIP":
                 logger.info("[%s] Agent SKIP — %s", tf, _agent["reason"])
                 continue

@@ -1,25 +1,35 @@
 """
 agent/promote_memory.py — Promote a candidate memory file to live memory.json.
 
-After trainer.py or seed_memory.py creates a memory_candidate_DATE.json,
-review it then run this script to promote it to live memory.
+Enforces a shadow-validation gate: the candidate must have been running in shadow
+mode for at least MIN_SHADOW_DAYS trading days before promotion is allowed.
+During shadow mode the system evaluates every signal with BOTH live memory and the
+candidate, logs differences to shadow_log.jsonl, and compares outcomes after close.
 
 Usage:
     python3 agent/promote_memory.py                      # promote latest candidate
     python3 agent/promote_memory.py --date 2026-08-29    # promote specific date
-    python3 agent/promote_memory.py --list               # list available candidates
+    python3 agent/promote_memory.py --list               # list candidates + shadow stats
+    python3 agent/promote_memory.py --force              # skip day-count gate
+    python3 agent/promote_memory.py --shadow-report      # just show shadow stats, no promote
 """
 
 import argparse
 import json
+import sqlite3
 import sys
+from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
 
-_AGENT_DIR   = Path(__file__).parent
-_MEMORY_PATH = _AGENT_DIR / "memory.json"
-_ARCHIVE_DIR = _AGENT_DIR / "memory_archive"
+_AGENT_DIR      = Path(__file__).parent
+_MEMORY_PATH    = _AGENT_DIR / "memory.json"
+_SHADOW_LOG     = _AGENT_DIR / "shadow_log.jsonl"
+_ARCHIVE_DIR    = _AGENT_DIR / "memory_archive"
+_MIN_SHADOW_DAYS = 3    # require this many distinct trading days before allowing promotion
 
+
+# ── Helpers ───────────────────────────────────────────────────────────────────
 
 def list_candidates() -> list[Path]:
     return sorted(_AGENT_DIR.glob("memory_candidate_*.json"), reverse=True)
@@ -27,6 +37,135 @@ def list_candidates() -> list[Path]:
 
 def _load_json(path: Path) -> dict:
     return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _load_shadow_entries(candidate_date: str) -> list[dict]:
+    """Load all shadow_log entries for a specific candidate date."""
+    if not _SHADOW_LOG.exists():
+        return []
+    entries = []
+    with _SHADOW_LOG.open(encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                e = json.loads(line)
+                if e.get("candidate_date") == candidate_date:
+                    entries.append(e)
+            except Exception:
+                pass
+    return entries
+
+
+def _shadow_stats(entries: list[dict]) -> dict:
+    """
+    Compute shadow performance stats.
+    Joins with DB to get actual outcomes for each shadowed signal.
+    """
+    if not entries:
+        return {"days": 0, "total": 0, "divergences": 0}
+
+    # Distinct trading days seen
+    days = len({e["date"] for e in entries})
+
+    # Count verdicts
+    total       = len(entries)
+    divergences = sum(1 for e in entries if e["live_verdict"] != e["shadow_verdict"])
+
+    # Agree rate
+    agree_rate = round((total - divergences) / total * 100, 1) if total else 0
+
+    # Join with DB for outcomes on signals that have closed
+    signal_ids = list({e["signal_id"] for e in entries if e.get("signal_id")})
+    outcomes: dict[int, str] = {}   # signal_id → win/loss/neutral
+    pnl_map:  dict[int, float] = {}
+
+    try:
+        import sys as _sys
+        _sys.path.insert(0, str(_AGENT_DIR.parent))
+        import config as _cfg
+        conn = sqlite3.connect(_cfg.DB_PATH)
+        conn.row_factory = sqlite3.Row
+        placeholders = ",".join("?" * len(signal_ids))
+        rows = conn.execute(f"""
+            SELECT id,
+                   COALESCE(result, sim_outcome) AS effective_result,
+                   COALESCE(pnl_points, sim_pnl_points) AS pnl
+            FROM signals
+            WHERE id IN ({placeholders})
+              AND (result IS NOT NULL OR sim_outcome IS NOT NULL)
+        """, signal_ids).fetchall()
+        conn.close()
+        for row in rows:
+            r = (row["effective_result"] or "").lower()
+            if   r in ("win", "target"):   outcomes[row["id"]] = "win"
+            elif r in ("loss", "stoploss"): outcomes[row["id"]] = "loss"
+            else:                           outcomes[row["id"]] = "neutral"
+            pnl_map[row["id"]] = row["pnl"] or 0
+    except Exception:
+        pass  # DB not available — show raw verdict stats only
+
+    # For signals where shadow would have SKIP'd but live said TRADE:
+    # what actually happened? (Did shadow correctly avoid a loss?)
+    shadow_only_skips = [e for e in entries
+                         if e["shadow_verdict"] == "SKIP" and e["live_verdict"] != "SKIP"]
+
+    skip_outcomes = [outcomes[e["signal_id"]] for e in shadow_only_skips
+                     if e.get("signal_id") in outcomes]
+    skip_wins    = skip_outcomes.count("win")
+    skip_losses  = skip_outcomes.count("loss")
+    skip_neutral = skip_outcomes.count("neutral")
+    skip_decided = skip_wins + skip_losses
+    skip_wr      = round(skip_wins / skip_decided * 100, 1) if skip_decided else None
+
+    # For signals both live and shadow said TRADE — baseline comparison
+    both_trade = [e for e in entries
+                  if e["shadow_verdict"] == "TRADE" and e["live_verdict"] == "TRADE"]
+    trade_outcomes = [outcomes[e["signal_id"]] for e in both_trade
+                      if e.get("signal_id") in outcomes]
+    trade_wins    = trade_outcomes.count("win")
+    trade_losses  = trade_outcomes.count("loss")
+    trade_decided = trade_wins + trade_losses
+    trade_wr      = round(trade_wins / trade_decided * 100, 1) if trade_decided else None
+
+    return {
+        "days":            days,
+        "total":           total,
+        "divergences":     divergences,
+        "agree_rate":      agree_rate,
+        "shadow_skips":    len(shadow_only_skips),
+        "skip_outcomes":   skip_decided,
+        "skip_wr":         skip_wr,
+        "skip_wins":       skip_wins,
+        "skip_losses":     skip_losses,
+        "skip_neutral":    skip_neutral,
+        "trade_wr":        trade_wr,
+        "trade_decided":   trade_decided,
+    }
+
+
+def _print_shadow_report(candidate_date: str, stats: dict) -> None:
+    print(f"\n  Shadow validation for candidate {candidate_date}:")
+    print(f"  Trading days : {stats['days']} / {_MIN_SHADOW_DAYS} required")
+    print(f"  Signals seen : {stats['total']}")
+    print(f"  Agreement    : {stats['agree_rate']}% with live memory")
+    print(f"  Divergences  : {stats['divergences']}")
+
+    if stats["shadow_skips"]:
+        print(f"\n  Shadow-only SKIPs: {stats['shadow_skips']} signals")
+        if stats["skip_outcomes"] > 0:
+            verdict = ("✅ adding value" if (stats["skip_wr"] or 0) < (stats["trade_wr"] or 50) - 5
+                       else "⚠️ skipping winners" if (stats["skip_wr"] or 0) > (stats["trade_wr"] or 50) + 5
+                       else "— neutral so far")
+            print(f"  Their WR      : {stats['skip_wr']}% ({stats['skip_wins']}W/"
+                  f"{stats['skip_losses']}L) — {verdict}")
+            if stats["trade_wr"] is not None:
+                print(f"  Both-TRADE WR : {stats['trade_wr']}% ({stats['trade_decided']} signals)")
+        else:
+            print("  Outcomes not yet known (signals still open or not enough data)")
+    else:
+        print("  No shadow-only SKIPs yet — candidate agrees with live on all signals.")
 
 
 def _diff_summary(old: dict, new: dict) -> str:
@@ -44,20 +183,24 @@ def _diff_summary(old: dict, new: dict) -> str:
     return "\n".join(lines) if lines else "  (no changes detected)"
 
 
+# ── Promote ───────────────────────────────────────────────────────────────────
+
 def promote(candidate_path: Path, force: bool = False) -> None:
     if not candidate_path.exists():
         print(f"ERROR: candidate not found: {candidate_path}")
         sys.exit(1)
 
-    new_memory = _load_json(candidate_path)
-
-    # Load current live memory (if any)
+    new_memory     = _load_json(candidate_path)
     old_memory: dict = {}
     if _MEMORY_PATH.exists():
         old_memory = _load_json(_MEMORY_PATH)
 
+    candidate_date = candidate_path.stem.replace("memory_candidate_", "")
+    shadow_entries = _load_shadow_entries(candidate_date)
+    stats          = _shadow_stats(shadow_entries)
+
     # Hypothesis tracker summary
-    ht = new_memory.get("hypothesis_tracker", {})
+    ht            = new_memory.get("hypothesis_tracker", {})
     h_validated   = sum(1 for s in ht.values() for r in s.get("rules",[]) if r.get("status")=="validated")
     h_rejected    = sum(1 for s in ht.values() for r in s.get("rules",[]) if r.get("status")=="rejected")
     h_testing     = sum(1 for s in ht.values() for r in s.get("rules",[]) if r.get("status")=="testing")
@@ -72,15 +215,26 @@ def promote(candidate_path: Path, force: bool = False) -> None:
     print(f"\nHypothesis tracker: ✅ {h_validated} validated | ❌ {h_rejected} rejected | "
           f"🔄 {h_testing} testing | ◇ {h_untested} untested")
     if h_validated:
-        print("  Validated rules:")
         for s in ht.values():
             for r in s.get("rules", []):
                 if r.get("status") == "validated":
                     w, l = r.get("wins",0), r.get("losses",0)
                     wr = round(w/(w+l)*100) if (w+l) else 0
                     print(f"    ✅ {r['rule']} ({r.get('signals_tested',0)} signals, {wr}% WR)")
+
+    _print_shadow_report(candidate_date, stats)
+
     print(f"\nChanges vs live memory.json:")
     print(_diff_summary(old_memory, new_memory))
+
+    # ── Shadow validation gate ────────────────────────────────────────────
+    if not force and stats["days"] < _MIN_SHADOW_DAYS:
+        print(f"\n⛔ Promotion blocked: only {stats['days']} shadow day(s) accumulated "
+              f"(need {_MIN_SHADOW_DAYS}).")
+        print(f"   The scheduler logs shadow verdicts to agent/shadow_log.jsonl each trading day.")
+        print(f"   Re-run promote_memory.py after {_MIN_SHADOW_DAYS - stats['days']} more trading day(s).")
+        print(f"   To bypass: python3 agent/promote_memory.py --force")
+        return
 
     print(f"\nThis will overwrite: {_MEMORY_PATH}")
     if not force:
@@ -101,17 +255,18 @@ def promote(candidate_path: Path, force: bool = False) -> None:
         json.dumps(new_memory, indent=2, ensure_ascii=False), encoding="utf-8"
     )
     print(f"Promoted  → {_MEMORY_PATH}")
-
-    # Clean up the candidate file
     candidate_path.unlink()
-    print(f"Removed candidate file: {candidate_path.name}")
+    print(f"Removed candidate: {candidate_path.name}")
 
+
+# ── Main ──────────────────────────────────────────────────────────────────────
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Promote candidate memory to live memory.json")
-    parser.add_argument("--date",  help="Specific candidate date (YYYY-MM-DD)")
-    parser.add_argument("--list",  action="store_true", help="List available candidates")
-    parser.add_argument("--force", action="store_true", help="Skip confirmation prompt")
+    parser.add_argument("--date",          help="Specific candidate date (YYYY-MM-DD)")
+    parser.add_argument("--list",          action="store_true", help="List candidates with shadow stats")
+    parser.add_argument("--force",         action="store_true", help="Skip shadow day-count gate")
+    parser.add_argument("--shadow-report", action="store_true", help="Show shadow stats without promoting")
     args = parser.parse_args()
 
     candidates = list_candidates()
@@ -120,14 +275,19 @@ def main() -> None:
         if not candidates:
             print("No candidate files found.")
             return
-        print("\nAvailable candidates:")
+        print(f"\n{'Candidate':<35} {'Days':>5} {'Sigs':>5} {'Agree':>7} {'ShadowSKIP WR':>14}")
+        print("-" * 72)
         for c in candidates:
             try:
-                d = _load_json(c)
-                print(f"  {c.name}  (regime={d.get('market_regime','?')}, "
-                      f"trained={d.get('last_trained','?')})")
+                d     = _load_json(c)
+                cdate = c.stem.replace("memory_candidate_", "")
+                ents  = _load_shadow_entries(cdate)
+                st    = _shadow_stats(ents)
+                skip_wr_str = f"{st['skip_wr']}%" if st.get("skip_wr") is not None else "n/a"
+                print(f"{c.name:<35} {st['days']:>5} {st['total']:>5} "
+                      f"{st['agree_rate']:>6}% {skip_wr_str:>14}")
             except Exception:
-                print(f"  {c.name}  (parse error)")
+                print(f"{c.name:<35} (error)")
         return
 
     if args.date:
@@ -139,8 +299,22 @@ def main() -> None:
         target = candidates[0]
         print(f"Using latest candidate: {target.name}")
 
+    if args.shadow_report:
+        cdate = target.stem.replace("memory_candidate_", "")
+        ents  = _load_shadow_entries(cdate)
+        stats = _shadow_stats(ents)
+        _print_shadow_report(cdate, stats)
+        return
+
     promote(target, force=args.force)
 
 
 if __name__ == "__main__":
+    import sys as _sys
+    _sys.path.insert(0, str(_AGENT_DIR.parent))
+    try:
+        from dotenv import load_dotenv
+        load_dotenv(_AGENT_DIR.parent / ".env")
+    except ImportError:
+        pass
     main()

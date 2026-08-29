@@ -136,6 +136,37 @@ SKIP: <one short reason>
 REVIEW: <one short reason>"""
 
 
+def evaluate_with_memory(signal_data: dict, zone_data: dict,
+                         vix: float | None, memory: dict) -> dict:
+    """
+    Evaluate using an explicitly supplied memory dict.
+    Used by the shadow evaluation path — does NOT write to eval_log.
+    """
+    try:
+        import anthropic
+    except ImportError:
+        return {"verdict": "REVIEW", "reason": "anthropic not installed"}
+
+    api_key = os.environ.get("ANTHROPIC_API_KEY")
+    if not api_key:
+        return {"verdict": "REVIEW", "reason": "no API key"}
+
+    if not memory or not memory.get("last_trained"):
+        return {"verdict": "TRADE", "reason": "candidate not trained yet"}
+
+    prompt = _build_prompt(signal_data, zone_data, vix, memory)
+    try:
+        client = anthropic.Anthropic(api_key=api_key)
+        msg = client.messages.create(
+            model=_MODEL,
+            max_tokens=200,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        return _parse_response(msg.content[0].text.strip())
+    except Exception as e:
+        return {"verdict": "REVIEW", "reason": f"API error: {str(e)[:60]}"}
+
+
 def _parse_response(raw: str) -> dict:
     for verdict in ("TRADE", "SKIP", "REVIEW"):
         if raw.upper().startswith(verdict):
