@@ -60,13 +60,30 @@ def run_backup() -> bool:
         if r.ok and r.json().get("ok"):
             msg = f"{filename} sent to Telegram."
             logger.info("Backup OK — %s", msg)
-            notify.backup_result(success=True, message=msg)
-            return True
         else:
             msg = r.json().get("description", r.text)
             logger.error("Telegram sendDocument failed: %s", msg)
             notify.backup_result(success=False, message=msg)
             return False
+
+        # Also back up agent memory if it exists
+        memory_path = config.BASE_DIR / "agent" / "memory.json"
+        if memory_path.exists():
+            try:
+                mem_filename = f"memory_{now_str}.json"
+                with open(memory_path, "rb") as mf:
+                    requests.post(
+                        f"https://api.telegram.org/bot{token}/sendDocument",
+                        data={"chat_id": chat_id, "caption": "🧠 agent/memory.json backup"},
+                        files={"document": (mem_filename, mf, "application/json")},
+                        timeout=30,
+                    )
+                logger.info("Memory backup sent — %s", mem_filename)
+            except Exception as me:
+                logger.warning("Memory backup failed (non-fatal): %s", me)
+
+        notify.backup_result(success=True, message=msg)
+        return True
 
     except Exception as e:
         logger.error("Backup error: %s", e)
