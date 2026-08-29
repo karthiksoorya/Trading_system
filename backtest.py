@@ -146,15 +146,16 @@ def _summarise(rows: list[dict], label: str) -> None:
     print(f"  EOD (no exit)   : {len(eods)}")
     print(f"  Net P&L (pts)   : {total_pnl:+.1f}")
     print(f"  Avg departure   : {sum(r['departure_strength'] for r in rows)/len(rows):.2f}xATR")
+    print(f"  Avg compression : {sum(r['base_compression'] for r in rows)/len(rows):.2f}xATR  (lower = tighter)")
     bos_ct = sum(1 for r in rows if r.get("bos"))
     print(f"  BOS confirmed   : {bos_ct}  ({_pct(bos_ct, len(rows))})")
     print(f"{'-'*60}")
-    print(f"  {'Zone':<8} {'Type':<5} {'Class':<7} {'Dep':<7} {'BOS':<5} {'Result':<6} {'P&L':>7}")
-    print(f"  {'-'*8} {'-'*5} {'-'*7} {'-'*7} {'-'*5} {'-'*6} {'-'*7}")
+    print(f"  {'Zone':<6} {'Type':<5} {'Class':<7} {'Dep':>5} {'Comp':>5} {'BOS':<4} {'Result':<6} {'P&L':>7}")
+    print(f"  {'-'*6} {'-'*5} {'-'*7} {'-'*5} {'-'*5} {'-'*4} {'-'*6} {'-'*7}")
     for r in rows:
-        print(f"  {r['zone_idx']:<8} {r['zone_type']:<5} {r['zone_class']:<7} "
-              f"  {r['departure_strength']:>4.2f}  {'Y' if r.get('bos') else 'N':<5} "
-              f"{r['outcome']:<6} {r['pnl_points']:>+6.1f}")
+        print(f"  {r['zone_idx']:<6} {r['zone_type']:<5} {r['zone_class']:<7} "
+              f"{r['departure_strength']:>5.2f} {r['base_compression']:>5.2f} "
+              f"{'Y' if r.get('bos') else 'N':<4} {r['outcome']:<6} {r['pnl_points']:>+6.1f}")
 
 
 # ── Main ──────────────────────────────────────────────────────────────────────
@@ -195,11 +196,12 @@ def run(candles: list[Candle], min_departure: float = 0.0,
 
         sim = _simulate_trade(zone, post)
         row = {
-            "zone_idx":         idx + 1,
-            "zone_type":        zone.zone_type,
-            "zone_class":       zone.zone_class,
+            "zone_idx":           idx + 1,
+            "zone_type":          zone.zone_type,
+            "zone_class":         zone.zone_class,
             "departure_strength": zone.departure_strength,
-            "bos":              bos_ok,
+            "base_compression":   zone.base_compression,
+            "bos":                bos_ok,
             **sim,
         }
         all_rows.append(row)

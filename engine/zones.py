@@ -23,6 +23,11 @@ class Zone:
     # Values > 1.5 indicate a strong impulsive departure from the base.
     # 0.0 when context candles are unavailable (zone at start of series).
     departure_strength: float = 0.0
+    # ATR-normalized base compression: base price range / 14-period ATR.
+    # Lower = tighter coil before the explosion = higher quality zone.
+    # < 0.5 = very compressed, > 1.5 = loose/sloppy base.
+    # 0.0 when context candles are unavailable.
+    base_compression: float = 0.0
 
     @property
     def base_length(self) -> int:
@@ -174,9 +179,11 @@ def _build_zone(
         # so it must always be included in the distal pool.
         distal = max(c.high for c in [leg_in] + base + [leg_out])
 
-    # ATR-normalized departure strength
+    # ATR-normalized quality metrics — both reuse the same ATR computation
     atr = _compute_atr(context_candles) if context_candles else 0.0
     departure_strength = round(leg_out.body / atr, 2) if atr > 0 else 0.0
+    base_range = max(c.high for c in base) - min(c.low for c in base)
+    base_compression = round(base_range / atr, 2) if atr > 0 else 0.0
 
     return Zone(
         zone_type=zone_type,
@@ -189,6 +196,7 @@ def _build_zone(
         base_candles=list(base),
         leg_out=leg_out,
         departure_strength=departure_strength,
+        base_compression=base_compression,
     )
 
 

@@ -199,3 +199,59 @@ class TestDepartureStrength:
             leg_in=_bull_exciting(), base_candles=[_boring()], leg_out=_bear_exciting(),
         )
         assert z.departure_strength == 0.0   # default, no crash
+
+
+# ── base_compression on Zone ──────────────────────────────────────────────────
+
+class TestBaseCompression:
+    """
+    base_compression = base price range / ATR.
+    Lower = tighter coil = higher quality.
+    """
+
+    def _make_dbr(self, n_context: int, base_candles: list):
+        context = [_c(100, 105, 95, 100)] * n_context
+        leg_in  = _bear_exciting()
+        leg_out = _c(88, 105, 87, 104)   # bullish exciting
+        return context + [leg_in] + base_candles + [leg_out]
+
+    def test_base_compression_positive_with_context(self):
+        base = [_c(87, 92, 83, 88)]   # boring, range=9
+        zones = detect_zones(self._make_dbr(15, base), "5minute")
+        assert len(zones) == 1
+        assert zones[0].base_compression > 0.0
+
+    def test_base_compression_zero_without_context(self):
+        base = [_c(87, 92, 83, 88)]
+        zones = detect_zones(self._make_dbr(0, base), "5minute")
+        assert len(zones) == 1
+        assert zones[0].base_compression == 0.0
+
+    def test_tighter_base_gives_lower_compression(self):
+        """A base with a small range scores lower (better) than a wide base."""
+        context = [_c(100, 105, 95, 100)] * 15
+
+        # Tight base: range = 2 pts
+        tight_base  = [_c(88, 89, 87, 88)]   # body=0, range=2, ratio=0 → boring
+        # Wide base: range = 18 pts
+        wide_base   = [_c(88, 97, 79, 88)]   # body=0, range=18, ratio=0 → boring
+
+        leg_in  = _bear_exciting()
+        leg_out = _c(88, 105, 87, 104)
+
+        zones_tight = detect_zones(context + [leg_in] + tight_base + [leg_out], "5minute")
+        zones_wide  = detect_zones(context + [leg_in] + wide_base  + [leg_out], "5minute")
+
+        assert len(zones_tight) == 1
+        assert len(zones_wide)  == 1
+        assert zones_tight[0].base_compression < zones_wide[0].base_compression
+
+    def test_zone_dataclass_default_base_compression(self):
+        """Old Zone() constructors without base_compression still work."""
+        z = Zone(
+            zone_type="DBR", zone_class="demand",
+            proximal=90.0, distal=80.0,
+            formed_at=_TS, timeframe="5minute",
+            leg_in=_bear_exciting(), base_candles=[_boring()], leg_out=_bull_exciting(),
+        )
+        assert z.base_compression == 0.0
