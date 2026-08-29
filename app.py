@@ -1570,7 +1570,70 @@ with tab_learning:
     st.subheader("📚 Trading Lessons from Live Sessions")
     st.caption("Key patterns and rules extracted from real trades. Updated after each live session.")
 
-    with st.expander("Aug 25, 2026 — ITM strike + 8 DTE: -₹29 options. PE IV crush confirmed.", expanded=True):
+    with st.expander("Aug 28, 2026 — Manual close = ₹1,398 loss. Options SL added. Profit-chasing strategy.", expanded=True):
+        st.markdown("""
+**4 trades. +113 index pts (4/4 wins). -₹1,333 options. Plus -₹578 from 2 manual Kite trades.**
+
+| Trade | Zone | Hold | Index P&L | Options P&L | Why |
+|-------|------|------|-----------|-------------|-----|
+| 856 AUTO | RBD supply | 1 min | +28.1 pts ✅ | **-₹104** | Speed crush — 28 pts not enough |
+| 862 | DBD supply | 1 min | +50.1 pts ✅ | **+₹172** | 50 pts overcame IV crush ✅ |
+| 867 | DBD supply | 13 min | +2.3 pts ✅ | **-₹1,398** | **MANUAL CLOSE during stall** |
+| 868 | DBD supply | 15 sec | +32.6 pts ✅ | **-₹3** | Too fast, essentially zero |
+
+**Trade 867 anatomy — the ₹1,398 loss:**
+Nifty stalled for 13 minutes (+2.3 pts only). Theta ate premium: ₹113.35 → ₹91.85 = -₹21.50 × 65. Target was still 43 pts away. User manually closed. If left to system: target or SL would have closed at a fraction of that loss.
+
+**Speed-of-move threshold confirmed:**
+| Move | Time | Options |
+|------|------|---------|
+| 28 pts | 1 min | LOSE |
+| 50 pts | 1 min | WIN ✅ |
+| 32 pts | 15 sec | FLAT |
+
+**Key rules from Aug 28:**
+1. **Never manually close a trade — ever.** Manual close locks in maximum theta decay at the worst moment.
+2. **Never trade on Kite outside the bot.** System context is invisible — both manual Kite trades lost.
+3. **Options need a loss cut, not just a profit lock.** When Nifty stalls, theta bleeds premium with no protection.
+
+**Fix deployed:** `OPTIONS_SL_PCT=20` — if options premium drops 20% from entry, system closes immediately. Stops the #867 scenario automatically.
+
+**9 skipped signals all hit target (+345 pts).** Zone detection is working. Losses came from execution, not signals.
+        """)
+
+    with st.expander("Aug 27, 2026 — Speed-of-move IV crush. 3/3 index wins, 2/3 options losses."):
+        st.markdown("""
+**3 trades. +226 index pts (3/3 wins). +₹373 options net.**
+
+| Trade | Hold | Index P&L | Options P&L |
+|-------|------|-----------|-------------|
+| 849 | **6 min** | +74.4 pts | **+₹955** ✅ |
+| 851 | **37 sec** | +77.2 pts | **-₹426** ❌ |
+| 855 | **39 sec** | +74.6 pts | **-₹156** ❌ |
+
+**The phenomenon:** When Nifty drops 77 pts in 37 seconds, market makers instantly price out all fear premium — time value collapses faster than intrinsic accumulates. Same direction, same zone quality, opposite hold time = opposite options outcome.
+
+**Trade 849 was the only profitable one because it took 6 minutes.** At 37 seconds, intrinsic gained 77 pts but time value lost 84 pts.
+
+**Why 851 and 855 were signalled (they weren't errors):** Each is a different zone at a different proximal level. Nifty kept falling and hitting fresh supply zones. All scored 10/10. The system was correct on direction. The problem was no "day is done" stop after first win.
+
+**Fix deployed:** `DAILY_OPTIONS_TARGET=730` stops new signals after ₹730 options profit. Also `TIME_EXIT_HOUR=13` now blocks new signals (not just closes open trades) — trade 855 at 14:01 would have been blocked.
+        """)
+
+    with st.expander("Aug 26, 2026 — First positive CE options P&L. AUTO-FIRST works. IV Rank live."):
+        st.markdown("""
+**2 signals. 1 traded (AUTO-FIRST). +58 index pts. +₹477 options.**
+
+Signal 835 auto-executed at market open, hit target in 9 minutes. First-ever positive CE options P&L.
+
+**Why it worked:** IV Rank was 8% (cheapest in 52-week range) at signal time. Cheap IV + correct direction + 9-minute hold = options and index aligned.
+
+**IV Rank filter confirmed live:** Signal 844 Telegram showed `IV Rank: 🟢 8%` — filter working correctly.
+
+**Rule:** Low IV Rank (< 30%) = strong condition to buy options. High IV Rank = premium likely to crush even on correct direction.
+        """)
+
+    with st.expander("Aug 25, 2026 — ITM strike + 8 DTE: -₹29 options. PE IV crush confirmed."):
         st.markdown("""
 **1 trade (signal 824): DBD supply, 3 TF confluence. +77.2 index pts. Options P&L: -₹29.**
 
