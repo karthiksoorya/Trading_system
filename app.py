@@ -621,7 +621,7 @@ with tab_engine:
     )
 
     st.markdown("**Scan Window** — restrict scanning to specific market hours (IST)")
-    _scan_win = _current.get("SCAN_WINDOW", {"start": "09:15", "end": "15:25"})
+    _scan_win = _current.get("SCAN_WINDOW", {"start": "09:15", "end": "10:30"})
     _sw_cols = st.columns(2)
     scan_start_time = _sw_cols[0].text_input(
         "Scan from (HH:MM)", value=_scan_win["start"],
@@ -631,7 +631,7 @@ with tab_engine:
         "Scan until (HH:MM)", value=_scan_win["end"],
         help="e.g. 15:00 — stop before end-of-day rush",
     )
-    st.caption("Set 09:15 → 15:25 to scan all day. Example: set 10:00 → 14:59 to skip 12:xx chop.")
+    st.caption("Default 09:15 → 10:30 — the golden window from live trade analysis. Widen only if you want afternoon signals (data shows 10:xx+ options trades are consistently losing).")
 
     st.divider()
     st.subheader("Options Exit Rules")

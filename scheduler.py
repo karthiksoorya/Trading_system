@@ -253,7 +253,7 @@ def _scan_core():
     _auto_first         = _s.get("AUTO_FIRST_TRADE",       False)
 
     # ── Scan window filter ────────────────────────────────────────────────
-    _win    = _s.get("SCAN_WINDOW", {"start": "09:15", "end": "15:25"})
+    _win    = _s.get("SCAN_WINDOW", {"start": "09:15", "end": "10:30"})
     _now_hm = datetime.now().strftime("%H:%M")
     if not (_win["start"] <= _now_hm <= _win["end"]):
         logger.info("Outside scan window (%s–%s) — skipping.", _win["start"], _win["end"])
