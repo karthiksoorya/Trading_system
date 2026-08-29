@@ -130,7 +130,7 @@ def _load_knowledge() -> str:
 
 # ── Build prompt ──────────────────────────────────────────────────────────────
 
-def _build_prompt(agg: dict, knowledge: str, current_memory: dict) -> str:
+def _build_prompt(agg: dict, knowledge: str, ext_knowledge: str, current_memory: dict) -> str:
     today = datetime.today().strftime("%Y-%m-%d")
     return f"""You are seeding the long-term memory for a NIFTY intraday demand/supply zone options trading agent.
 
@@ -151,6 +151,9 @@ Supply zones:  {agg['supply_wr']}
 
 TRADER'S WRITTEN KNOWLEDGE (AGENT_KNOWLEDGE.md):
 {knowledge}
+
+EXTERNAL REFERENCE KNOWLEDGE (ingested sources — books, articles, tutorials):
+{ext_knowledge}
 
 CURRENT MEMORY (to merge into, not replace blindly):
 {json.dumps(current_memory, indent=2)}
@@ -214,7 +217,12 @@ def run() -> None:
         logger.info("Aborted.")
         return
 
-    prompt = _build_prompt(agg, knowledge, current_memory)
+    # Load ingested external knowledge
+    from agent.ingest import load_all_knowledge
+    ext_knowledge = load_all_knowledge()
+    logger.info("External knowledge sources: %s", ext_knowledge[:80] + "..." if len(ext_knowledge) > 80 else ext_knowledge)
+
+    prompt = _build_prompt(agg, knowledge, ext_knowledge, current_memory)
 
     logger.info("Calling Claude Sonnet to synthesise memory ...")
     try:
