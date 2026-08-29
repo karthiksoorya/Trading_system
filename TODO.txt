@@ -42,6 +42,31 @@ Last updated: August 21, 2026
      NOTE: Review after 1 week — may replace with index 75% partial exit
 
 
+⏳ PENDING — CRITICAL (from 3-year backtest, Aug 29 2026)
+------------------------------------------------------------
+[ ] Limit-order entry at the zone proximal  → docs/LIMIT_ENTRY_DESIGN.md
+      → BIGGEST lever. Backtest: market-order-on-approval loses ~4,300 index
+         points / 3 years vs a limit order resting at the proximal.
+      → "Armed" signal state: on approve, poll the index; fire the option
+         order only when Nifty touches the proximal; cancel after
+         SIGNAL_EXPIRY_MINUTES or if the zone breaks.
+      → Behind ENTRY_MODE setting, paper first. Do NOT ship same-day with
+         any other live change.
+      → Files: journal/db.py, telegram_handler.py, scheduler.py, config.py, app.py
+
+[x] PE-only + high-quality-only config   (DONE Aug 29, commit 2f9cc13)
+      → SCAN_ZONE_CLASSES=supply (CE had -245 pts/3y), MIN_BOOSTER_SCORE=10,
+         MIN_CONFLUENCE=3, MIN_RISK_POINTS=15 (new), ZONE_APPROACH=30,
+         MAX_TRADES_PER_DAY=2. Also set these in dashboard Settings (settings.json
+         overrides config.py on the VPS).
+
+[ ] Grow the per-trade edge above the cost floor
+      → Even the strict config: +3.5 idx pts/trade, still -Rs308/trade after
+         Zerodha costs (STT ~Rs312 on notional). Options lose Rs950-1400/trade.
+      → Options: wider targets, or only trade when the move is expected to be
+         big (news, opening range break), or accept it's a futures-only edge.
+
+
 ⏳ PENDING — HIGH PRIORITY (build after 1 week of live data)
 ------------------------------------------------------------
 [ ] Replace options trail with index 75% partial exit
@@ -67,10 +92,11 @@ Last updated: August 21, 2026
       → Check: is there an HPA between entry and target? If yes, cap target there.
       → File: engine/signals.py (extend opposing zone cap)
 
-[ ] Approval delay tracking
+[ ] Approval delay tracking   (mostly superseded by the limit-entry change above)
       → Log approved_time in DB (new column)
-      → If delay > 5 min from time_signal, flag in Telegram and dashboard
-      → You are consistently entering 3-5 min late — this tightens R:R
+      → Backtest CONFIRMED: 2-5 min late entry converts +366 pts/3y into -3,941.
+      → If limit-entry is built, this becomes just a diagnostic. Until then,
+         flag delay > 2 min in Telegram.
       → File: journal/db.py (add approved_at column), telegram_handler.py
 
 
