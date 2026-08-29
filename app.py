@@ -344,8 +344,8 @@ def _engine_panel():
 
 # ── Tabs ──────────────────────────────────────────────────────────────────
 _pending_label = f"🔔 Approvals ({pending_count()})" if pending_count() else "🔔 Approvals"
-tab_approvals, tab_engine, tab_signals, tab_performance, tab_learning, tab_tutorial = st.tabs([
-    _pending_label, "🔧 Engine", "📊 Signals", "📈 Performance", "🤖 Learning", "📖 Tutorial"
+tab_approvals, tab_engine, tab_signals, tab_performance, tab_learning, tab_tutorial, tab_zones = st.tabs([
+    _pending_label, "🔧 Engine", "📊 Signals", "📈 Performance", "🤖 Learning", "📖 Tutorial", "🔍 Zones"
 ])
 
 
@@ -2167,3 +2167,172 @@ cd ~/Trading_system && git pull && sudo systemctl restart trading
         """)
 
     st.info("💡 Update this tab whenever you discover something new — it's your permanent reference.")
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# TAB 7 — ZONES  (zone quality inspector)
+# ══════════════════════════════════════════════════════════════════════════
+with tab_zones:
+    st.header("Zone Inspector")
+    st.caption(
+        "Fetches live Nifty candles from Kite and runs zone detection. "
+        "Shows departure strength (leg-out / ATR) and base compression (base range / ATR) "
+        "for every detected zone. Requires today's Kite token."
+    )
+
+    _z_settings = config.load_settings()
+    _z_tfs = _z_settings.get("SCAN_TIMEFRAMES", [config.TF_LOWER, config.TF_INTERMEDIATE, config.TF_HIGHER])
+    _z_classes = _z_settings.get("SCAN_ZONE_CLASSES", config.SCAN_ZONE_CLASSES)
+
+    _zc1, _zc2, _zc3 = st.columns(3)
+    _z_tf_sel = _zc1.selectbox(
+        "Timeframe", options=_z_tfs,
+        index=0,
+        help="Fetch candles and detect zones for this timeframe.",
+    )
+    _z_days = _zc2.number_input(
+        "History (days)", min_value=5, max_value=90, value=30, step=5,
+        help="How many days of candles to fetch. More days = older zones visible.",
+    )
+    _z_class_filter = _zc3.multiselect(
+        "Zone class", options=["demand", "supply"],
+        default=_z_classes,
+        help="Filter to show only these zone classes.",
+    )
+
+    _token_ok_z = False
+    if config.TOKEN_FILE.exists():
+        try:
+            import json as _jz
+            _tdz = _jz.loads(config.TOKEN_FILE.read_text())
+            _token_ok_z = _tdz.get("date") == date.today().isoformat()
+        except Exception:
+            pass
+
+    if not _token_ok_z:
+        st.warning("No valid Kite token for today — go to Engine tab and login first.")
+
+    if st.button("🔍 Scan Zones Now", type="primary", disabled=not _token_ok_z,
+                 help="Fetches candles from Kite and runs zone detection."):
+        with st.spinner(f"Fetching {_z_days} days of {_z_tf_sel} candles from Kite..."):
+            try:
+                from brokers.kite_adapter import KiteAdapter as _KAZ
+                from engine.zones import detect_zones as _dz, update_zone_state as _uzs, detect_bos as _dbos
+
+                _kaz = _KAZ()
+                _candles = _kaz.get_historical(config.NIFTY_SYMBOL, _z_tf_sel, _z_days)
+                if not _candles:
+                    st.error("No candles returned — check Kite connection.")
+                else:
+                    _raw_zones = _dz(_candles, _z_tf_sel)
+
+                    # Update touch counts and validity against all candles after zone formed
+                    _zone_rows = []
+                    for _z in _raw_zones:
+                        # Find formation index
+                        _fi = next(
+                            (k for k, c in enumerate(_candles) if c.timestamp >= _z.formed_at), None
+                        )
+                        if _fi is not None:
+                            _uzs(_z, _candles[_fi + 1:])
+
+                        # BOS: look at candles before zone formation for structural confirmation
+                        _pre = _candles[:(_fi + 1)] if _fi is not None else []
+                        _bos = _dbos(_pre, lookback=20) if _pre else None
+                        _bos_aligned = (
+                            _bos is not None and (
+                                (_z.zone_class == "demand" and _bos.direction == "bullish") or
+                                (_z.zone_class == "supply" and _bos.direction == "bearish")
+                            )
+                        )
+
+                        _zone_rows.append({
+                            "Class":       _z.zone_class,
+                            "Type":        _z.zone_type,
+                            "Proximal":    round(_z.proximal, 2),
+                            "Distal":      round(_z.distal, 2),
+                            "Formed":      _z.formed_at.strftime("%m-%d %H:%M"),
+                            "Departure":   _z.departure_strength,
+                            "Compression": _z.base_compression,
+                            "BOS":         "✅" if _bos_aligned else "—",
+                            "Touches":     _z.touch_count,
+                            "Valid":       "✅" if _z.is_valid else "❌",
+                        })
+
+                    st.session_state["_zone_rows"] = _zone_rows
+                    st.session_state["_zone_candle_count"] = len(_candles)
+                    st.session_state["_zone_tf"] = _z_tf_sel
+                    st.success(
+                        f"Found {len(_raw_zones)} zones across {len(_candles)} candles "
+                        f"({_z_days} days, {_z_tf_sel})"
+                    )
+            except Exception as _ze:
+                st.error(f"Scan failed: {_ze}")
+
+    # ── Results ────────────────────────────────────────────────────────────
+    if "zone_rows" in [k.lstrip("_") for k in st.session_state]:
+        _rows = st.session_state.get("_zone_rows", [])
+    else:
+        _rows = []
+
+    if _rows:
+        import pandas as _zpd
+
+        _zdf = _zpd.DataFrame(_rows)
+
+        # Apply class filter
+        if _z_class_filter:
+            _zdf = _zdf[_zdf["Class"].isin(_z_class_filter)]
+
+        if _zdf.empty:
+            st.info("No zones match the selected class filter.")
+        else:
+            # Summary metrics
+            _valid_ct = (_zdf["Valid"] == "✅").sum()
+            _bos_ct   = (_zdf["BOS"]   == "✅").sum()
+            _avg_dep  = _zdf["Departure"].mean()
+            _avg_comp = _zdf["Compression"].mean()
+            _tight_ct = (_zdf["Compression"] < 0.5).sum()
+
+            _sm1, _sm2, _sm3, _sm4, _sm5 = st.columns(5)
+            _sm1.metric("Total Zones",    len(_zdf))
+            _sm2.metric("Valid",          _valid_ct)
+            _sm3.metric("BOS Confirmed",  _bos_ct)
+            _sm4.metric("Avg Departure",  f"{_avg_dep:.2f}×ATR")
+            _sm5.metric("Tight Bases (<0.5)", _tight_ct)
+
+            st.caption(
+                "**Departure** = leg-out body / ATR  (higher = stronger explosion from base)  |  "
+                "**Compression** = base range / ATR  (lower = tighter coil = higher quality)"
+            )
+
+            # Colour rows: green demand, red supply, dim invalid
+            def _colour_zone_row(row):
+                styles = [""] * len(row)
+                idx = row.index.tolist()
+                base = "background-color:#d4edda;color:#155724" if row["Class"] == "demand" \
+                       else "background-color:#f8d7da;color:#721c24"
+                if row["Valid"] == "❌":
+                    base = "color:#aaaaaa"
+                for i in range(len(styles)):
+                    styles[i] = base
+                # Highlight strong departure
+                if "Departure" in idx and row["Valid"] == "✅":
+                    dep_i = idx.index("Departure")
+                    if row["Departure"] >= 1.5:
+                        styles[dep_i] = "background-color:#fff3cd;color:#856404;font-weight:bold"
+                # Highlight tight compression
+                if "Compression" in idx and row["Valid"] == "✅":
+                    cmp_i = idx.index("Compression")
+                    if row["Compression"] < 0.5:
+                        styles[cmp_i] = "background-color:#cce5ff;color:#004085;font-weight:bold"
+                return styles
+
+            _styled_zdf = _zdf.style.apply(_colour_zone_row, axis=1)
+            st.dataframe(_styled_zdf, use_container_width=True, hide_index=True)
+
+            st.caption(
+                "🟡 Yellow = departure ≥ 1.5× ATR (strong explosion)  |  "
+                "🔵 Blue = compression < 0.5× ATR (very tight base)  |  "
+                "Grey = invalid (zone broken by price)"
+            )
