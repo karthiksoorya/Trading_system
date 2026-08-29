@@ -45,16 +45,17 @@ def _fmt_table(rows: list[dict]) -> str:
 
 
 def main():
-    ap = argparse.ArgumentParser()
+    _d = DSParams()   # defaults mirror the live config
+    ap = argparse.ArgumentParser(description="Defaults mirror config.py (PE-only, score 10, conf 3, ...)")
     ap.add_argument("--from", dest="start", default=None)
     ap.add_argument("--to", dest="end", default=None)
-    ap.add_argument("--classes", default="demand,supply")
-    ap.add_argument("--entry-tf", default="5minute")
-    ap.add_argument("--min-confluence", type=int, default=2)
-    ap.add_argument("--min-score", type=float, default=8.0)
-    ap.add_argument("--approach", type=float, default=50.0)
-    ap.add_argument("--min-risk", type=float, default=10.0, help="skip signals with |entry-SL| below this (0=off)")
-    ap.add_argument("--max-risk", type=float, default=0.0, help="skip signals with |entry-SL| above this (0=off)")
+    ap.add_argument("--classes", default=",".join(_d.active_classes))
+    ap.add_argument("--entry-tf", default=_d.entry_tf)
+    ap.add_argument("--min-confluence", type=int, default=_d.min_confluence)
+    ap.add_argument("--min-score", type=float, default=_d.min_booster_score)
+    ap.add_argument("--approach", type=float, default=_d.zone_approach_points)
+    ap.add_argument("--min-risk", type=float, default=_d.min_risk_points, help="skip signals with |entry-SL| below this (0=off)")
+    ap.add_argument("--max-risk", type=float, default=_d.max_risk_points, help="skip signals with |entry-SL| above this (0=off)")
     ap.add_argument("--no-trend-filter", action="store_true")
     ap.add_argument("--no-ce-time-filter", action="store_true")
     ap.add_argument("--no-vix-filter", action="store_true")

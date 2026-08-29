@@ -583,8 +583,8 @@ with tab_engine:
     scan_classes = st.multiselect(
         "Zone Classes",
         options=["demand", "supply"],
-        default=_current.get("SCAN_ZONE_CLASSES", ["demand", "supply"]),
-        help="Uncheck 'supply' to only trade demand zones (long bias), or vice versa.",
+        default=_current.get("SCAN_ZONE_CLASSES", config.SCAN_ZONE_CLASSES),
+        help="3-year backtest: demand/CE had negative expectancy. Default is supply-only (PE).",
     )
 
     expiry_minutes = st.slider(
@@ -601,7 +601,16 @@ with tab_engine:
         value=int(_current.get("ZONE_APPROACH_POINTS", config.ZONE_APPROACH_POINTS)),
         step=5,
         help="Signal only fires if LTP is within this many points of the zone proximal. "
-             "50 = only near zones. Increase if you miss too many signals.",
+             "30 = tight (enter near the line). Raising it enters further into the move — worse R:R.",
+    )
+
+    min_risk = st.number_input(
+        "Min Risk (points)",
+        min_value=0, max_value=60,
+        value=int(_current.get("MIN_RISK_POINTS", config.MIN_RISK_POINTS)),
+        step=1,
+        help="Skip signals whose entry-to-SL distance is below this. Degenerate tiny zones "
+             "give a 2R target only a few points away. 0 = off.",
     )
 
     col_score, col_conf = st.columns(2)
@@ -759,6 +768,7 @@ with tab_engine:
                 "SCAN_ZONE_CLASSES":     scan_classes,
                 "SIGNAL_EXPIRY_MINUTES": expiry_minutes,
                 "ZONE_APPROACH_POINTS":  zone_approach,
+                "MIN_RISK_POINTS":       min_risk,
                 "MIN_BOOSTER_SCORE":     min_score,
                 "MIN_CONFLUENCE":        min_conf,
                 "SCAN_WINDOW":           {"start": scan_start_time, "end": scan_end_time},
@@ -1611,11 +1621,21 @@ Naked options are worse — every strike/expiry variant loses ₹950–1,400/tra
 
 2024 carried the whole result. 2026 — the live-trading year — is net negative.
 
-**What to do (priority order):**
-1. Move live entry to a limit order resting at the proximal (`docs/LIMIT_ENTRY_DESIGN.md`).
-2. Restrict or turn off demand/CE (`SCAN_ZONE_CLASSES = supply`).
-3. The per-trade edge must grow a lot (wider targets / far fewer, higher-quality trades) or
-   no instrument is profitable after costs.
+**Config change deployed Aug 29** — high-quality-only, PE-only:
+
+| Setting | Old | New | Why |
+|---|---|---|---|
+| Zone Classes | demand + supply | **supply only** | CE = −245 pts / 3y |
+| Min Booster Score | 8 | **10** | perfect setups only |
+| Min Confluence | 2 | **3** | all 3 TFs must agree — this is what actually concentrates quality |
+| Zone Approach | 50 | **30** | tighter = enter closer to the line |
+| Min Risk (new) | — | **15 pts** | skip degenerate tiny-base zones |
+| Max Trades/Day | 4 | **2** | cap (real frequency at this bar ≈ 1/month) |
+
+Backtest of the strict config (PE, score 10, conf 3, risk 15, approach 30): **42 trades in 3 years,
++3.5 index pts/trade, ~40% win**. Still **−₹308/trade after costs** — the booster score is a weak
+quality filter, confluence 3 + tight approach + min-risk is what helps. This buys time and cuts
+exposure; the limit-entry fix is what changes the economics.
         """)
 
     with st.expander("Aug 28, 2026 — Manual close = ₹1,398 loss. Options SL added. Profit-chasing strategy."):
@@ -1878,20 +1898,21 @@ Actual options P&L may differ due to theta decay and IV changes.
     # ── Settings Guide ────────────────────────────────────────────────────
     with st.expander("⚙️ Settings — What Each One Does"):
         st.markdown("""
-| Setting | Value | Why |
+| Setting | Value (Aug 29 2026) | Why |
 |---------|-------|-----|
 | Entry Timeframe | 5minute | Best signal volume and accuracy |
-| Min Booster Score | 9 | Filters weak setups |
-| Min Confluence | 1 | Set to 1 — confluence=2 produced zero signals |
-| Zone Approach | 100 pts | Signal fires when LTP within 100 pts of zone |
+| Min Booster Score | 10 | Perfect setups only (3y backtest: score is a weak quality filter, but no harm going strict) |
+| Min Confluence | 3 | All 3 TFs must agree — this is what actually concentrates quality |
+| Zone Approach | 30 pts | Tighter = enter closer to the line (was 50) |
+| Min Risk | 15 pts | Skip degenerate tiny-base zones (target would be a few pts away) |
 | Signal Expiry | 45 min | Pending signals older than 45 min auto-expired |
 | SL Buffer | 5 pts | Extra buffer beyond zone distal — avoids wick stop-outs |
-| Zone Classes | Demand only | Supply zones underperformed |
-| Scan Window | 09:15–15:25 | Consider 10:00–15:25 to skip opening volatility |
+| Zone Classes | **supply only** | 3-year backtest: demand/CE had negative expectancy (−245 pts). PE carries the strategy. |
+| Max Trades/Day | 2 | Hard cap. Real frequency at this quality bar ≈ 1 trade/month. |
+| Scan Window | 09:15–10:30 | Golden window from live analysis; afternoon options trades consistently lose |
 
-**Why confluence = 1:**
-Engine produced zero signals for a week with confluence=2.
-Only 2 valid 60min zones existed and none overlapped with 15min zones.
+At this quality bar the system will go days or weeks with no signal. That is expected —
+it is waiting for a supply zone with full 3-timeframe confluence in the morning window.
         """)
 
     # ── Time of Day Insights ──────────────────────────────────────────────

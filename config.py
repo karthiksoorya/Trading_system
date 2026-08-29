@@ -28,9 +28,13 @@ MODE   = "paper"   # "paper" | "live"
 # daily loss limit and the paper-mode position_size display only.
 CAPITAL              = 1_00_000  # ₹1,00,000 (1 lakh) — realistic for 1-lot Nifty options
 MAX_RISK_PCT         = 0.01      # 1% of capital per day → ₹1,000
-MAX_TRADES_PER_DAY   = 4
-MIN_BOOSTER_SCORE    = 8        # Score < 8 → no trade
-MIN_CONFLUENCE       = 1        # minimum TFs in agreement to generate signal
+# Aug 29 2026 — 3-year backtest: only take a few very high-quality trades.
+# demand/CE had negative 3y expectancy → PE only. Booster score alone isn't a
+# good quality proxy; confluence 3 + tight approach + a min-risk floor is.
+MAX_TRADES_PER_DAY   = 2        # hard daily cap (real frequency at this quality bar is ~1/month)
+MIN_BOOSTER_SCORE    = 10       # perfect setups only (all 4 boosters maxed)
+MIN_CONFLUENCE       = 3        # all 3 timeframes must agree (5m zone nested in 15m nested in 60m)
+MIN_RISK_POINTS      = 15       # skip signals whose |entry - SL| is below this (noise-floor zones)
 NIFTY_LOT_SIZE       = 65       # Nifty 50 lot size — revised by NSE effective Jan 2026 (was 75)
 
 # ── Instruments ────────────────────────────────────────────────────────────
@@ -69,7 +73,7 @@ EXCITING_CANDLE_BODY_RATIO = 0.50   # body > 50% of range → exciting
 # Set to 0 for pure price action (SL exactly at distal).
 SL_BUFFER_POINTS       = 5
 SIGNAL_EXPIRY_MINUTES  = 45   # pending signals older than this are auto-expired
-ZONE_APPROACH_POINTS   = 50   # LTP must be within this many pts of proximal
+ZONE_APPROACH_POINTS   = 30   # LTP must be within this many pts of proximal (was 50 — tighter = better entries)
 
 # ── Options Exit Rules ─────────────────────────────────────────────────────
 # These protect options P&L independently of the index level.
@@ -149,8 +153,9 @@ SL_BUFFER_POINTS      = _s.get("SL_BUFFER_POINTS",      SL_BUFFER_POINTS)
 SIGNAL_EXPIRY_MINUTES = _s.get("SIGNAL_EXPIRY_MINUTES", SIGNAL_EXPIRY_MINUTES)
 MIN_BOOSTER_SCORE     = _s.get("MIN_BOOSTER_SCORE",     MIN_BOOSTER_SCORE)
 MIN_CONFLUENCE        = _s.get("MIN_CONFLUENCE",         MIN_CONFLUENCE)
+MIN_RISK_POINTS       = _s.get("MIN_RISK_POINTS",        MIN_RISK_POINTS)
 ZONE_APPROACH_POINTS  = _s.get("ZONE_APPROACH_POINTS",  ZONE_APPROACH_POINTS)
 SCAN_TIMEFRAMES       = _s.get("SCAN_TIMEFRAMES",       [TF_LOWER, TF_INTERMEDIATE, TF_HIGHER])
-SCAN_ZONE_CLASSES     = _s.get("SCAN_ZONE_CLASSES",     ["demand", "supply"])
+SCAN_ZONE_CLASSES     = _s.get("SCAN_ZONE_CLASSES",     ["supply"])   # CE off — demand had negative 3y expectancy
 DAILY_OPTIONS_TARGET  = _s.get("DAILY_OPTIONS_TARGET",  DAILY_OPTIONS_TARGET)
 OPTIONS_SL_PCT        = _s.get("OPTIONS_SL_PCT",         OPTIONS_SL_PCT)

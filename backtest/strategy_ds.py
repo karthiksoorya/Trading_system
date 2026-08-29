@@ -32,13 +32,15 @@ TF_ORDER = ["5minute", "15minute", "60minute"]
 
 @dataclass
 class DSParams:
+    # Defaults mirror the LIVE config (config.py) as of Aug 29 2026:
+    # PE only, perfect score, 3-TF confluence, 15pt min risk, 30pt approach, 2/day.
     entry_tf: str = "5minute"
-    active_classes: tuple[str, ...] = ("demand", "supply")
-    min_booster_score: float = 8.0
-    min_confluence: int = 2
-    zone_approach_points: float = 50.0
+    active_classes: tuple[str, ...] = ("supply",)
+    min_booster_score: float = 10.0
+    min_confluence: int = 3
+    zone_approach_points: float = 30.0
     sl_buffer_points: float = 5.0
-    min_risk_points: float = 10.0          # skip signals whose |entry-SL| is below this (noise floor)
+    min_risk_points: float = 15.0          # skip signals whose |entry-SL| is below this (noise floor)
     max_risk_points: float = 0.0           # skip signals whose |entry-SL| is above this (0 = off)
     signal_expiry_minutes: int = 45       # a limit entry order lives this long, then cancels
     # approval-latency model (market entry only): how long between signal and the
@@ -49,7 +51,7 @@ class DSParams:
     scan_start: time = time(9, 15)
     scan_end: time = time(13, 0)
     time_exit_hour: int = 13
-    max_trades_per_day: int = 4
+    max_trades_per_day: int = 2
 
     # toggleable filters
     trend_filter: bool = True             # 60min trend must align with zone class

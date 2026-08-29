@@ -247,6 +247,7 @@ def _scan_core():
     active_tfs          = _s.get("SCAN_TIMEFRAMES",      _TF_ORDER)
     active_classes      = set(_s.get("SCAN_ZONE_CLASSES",  ["demand", "supply"]))
     min_confluence      = _s.get("MIN_CONFLUENCE",         config.MIN_CONFLUENCE)
+    min_risk_pts        = _s.get("MIN_RISK_POINTS",        config.MIN_RISK_POINTS)
     zone_approach_pts   = _s.get("ZONE_APPROACH_POINTS",   config.ZONE_APPROACH_POINTS)
     disabled_zone_types = set(_s.get("DISABLED_ZONE_TYPES", []))
     entry_tf            = _s.get("ENTRY_TIMEFRAME",        config.TF_LOWER)
@@ -410,6 +411,17 @@ def _scan_core():
                 logger.info(
                     "[%s] Skipped — confluence %d < min %d required",
                     tf, signal.confluence.count, min_confluence,
+                )
+                continue
+
+            # Min-risk floor: a degenerate zone (tiny doji base) gives a 2R target
+            # only a few points away that any bar clips instantly — the "win" can't
+            # cover costs. Backtest (Aug 29): |entry-SL| >= 15 is the useful floor.
+            _risk = abs(signal.entry - signal.stop_loss)
+            if min_risk_pts and _risk < min_risk_pts:
+                logger.info(
+                    "[%s] Skipped — risk %.1f pts < min %d (degenerate zone)",
+                    tf, _risk, min_risk_pts,
                 )
                 continue
 
