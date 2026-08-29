@@ -41,6 +41,11 @@ class DSParams:
     min_risk_points: float = 10.0          # skip signals whose |entry-SL| is below this (noise floor)
     max_risk_points: float = 0.0           # skip signals whose |entry-SL| is above this (0 = off)
     signal_expiry_minutes: int = 45       # a limit entry order lives this long, then cancels
+    # approval-latency model (market entry only): how long between signal and the
+    # market order actually going in. delay_bars = whole 5-min bars, delay_frac =
+    # fraction into the fill bar (0=open, 1=close) for sub-bar "few seconds" drift.
+    entry_delay_bars: int = 0
+    entry_delay_frac: float = 0.0
     scan_start: time = time(9, 15)
     scan_end: time = time(13, 0)
     time_exit_hour: int = 13

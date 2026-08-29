@@ -62,6 +62,10 @@ def main():
     ap.add_argument("--entry-mode", choices=["limit", "market"], default="limit",
                     help="limit = order at zone proximal, no fill if price never returns; "
                          "market = fill next bar open (current live behaviour)")
+    ap.add_argument("--entry-delay-bars", type=int, default=0,
+                    help="market mode: extra 5-min bars between signal and fill (approval lag)")
+    ap.add_argument("--entry-delay-frac", type=float, default=0.0,
+                    help="market mode: fraction into the fill bar (0=open,1=close) for sub-bar lag")
     ap.add_argument("--csv", default=None)
     args = ap.parse_args()
 
@@ -73,6 +77,8 @@ def main():
         zone_approach_points=args.approach,
         min_risk_points=args.min_risk,
         max_risk_points=args.max_risk,
+        entry_delay_bars=args.entry_delay_bars,
+        entry_delay_frac=args.entry_delay_frac,
         trend_filter=not args.no_trend_filter,
         ce_after_11=not args.no_ce_time_filter,
         vix_direction_filter=not args.no_vix_filter,

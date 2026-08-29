@@ -1570,7 +1570,55 @@ with tab_learning:
     st.subheader("📚 Trading Lessons from Live Sessions")
     st.caption("Key patterns and rules extracted from real trades. Updated after each live session.")
 
-    with st.expander("Aug 28, 2026 — Manual close = ₹1,398 loss. Options SL added. Profit-chasing strategy.", expanded=True):
+    with st.expander("Aug 29, 2026 — 3-year backtest: the edge does not hold as traded", expanded=True):
+        st.markdown("""
+Built an offline backtest (`backtest/`) that replays the **real** `engine/` zone logic against
+**3 years of real Kite 5-min Nifty + VIX data**. Futures P&L uses real index data. Full detail:
+`backtest/README.md` and `AGENT_KNOWLEDGE.md` §14.
+
+**1. Approving from Telegram is the biggest single leak (~4,300 index pts / 3 years).**
+
+| Entry method | idx pts / 3y | per trade | "target" hit at | losing "target" exits |
+|---|---|---|---|---|
+| Limit order resting AT the proximal | **+366** | +1.1 | **+41.8 pts** | **0 of 84** |
+| Market order ~2.5 min after signal | **−3,941** | −4.9 | +0.8 pts | 267 of 543 |
+| Market order ~7.5 min after signal | −4,624 | −5.8 | −0.5 pts | 259 of 508 |
+
+The few *seconds* barely matter — it's the 2–5 minutes between the signal and the tap. By then
+price has run to the target, so "target" fills instantly at a level barely above your (worse)
+entry and **half of those "wins" are losses**. Fix: `docs/LIMIT_ENTRY_DESIGN.md` — a real limit
+order that rests at the proximal and fills only if price comes back.
+**Until then: approve the instant the signal arrives, or not at all.**
+
+**2. Demand / CE has negative expectancy over 3 years.**
+
+| Side | idx pts / 3y | per trade |
+|---|---|---|
+| supply / PE | **+611** (245 trades) | +2.5 |
+| demand / CE | **−245** (88 trades) | −2.8 |
+
+**3. Costs exceed the edge.** PE side, correct entry: gross **+₹133/trade**. Zerodha futures
+round-trip ≈ **₹493/trade** (STT alone ≈ ₹312, charged on ₹15.6 L notional). Net **−₹360/trade**.
+Naked options are worse — every strike/expiry variant loses ₹950–1,400/trade.
+
+**4. Not regime-stable.**
+
+| Year | idx pts | PE | CE | win% |
+|---|---|---|---|---|
+| 2024 | **+641** | +688 | −47 | 45 |
+| 2025 | +150 | +50 | +100 | 41 |
+| 2026 | **−386** | −96 | −290 | 34 |
+
+2024 carried the whole result. 2026 — the live-trading year — is net negative.
+
+**What to do (priority order):**
+1. Move live entry to a limit order resting at the proximal (`docs/LIMIT_ENTRY_DESIGN.md`).
+2. Restrict or turn off demand/CE (`SCAN_ZONE_CLASSES = supply`).
+3. The per-trade edge must grow a lot (wider targets / far fewer, higher-quality trades) or
+   no instrument is profitable after costs.
+        """)
+
+    with st.expander("Aug 28, 2026 — Manual close = ₹1,398 loss. Options SL added. Profit-chasing strategy."):
         st.markdown("""
 **4 trades. +113 index pts (4/4 wins). -₹1,333 options. Plus -₹578 from 2 manual Kite trades.**
 

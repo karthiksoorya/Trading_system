@@ -81,7 +81,9 @@ def _entry_fill(sig, bars: pd.DataFrame, decision_bi: int, decision_time: dateti
     """Resolve an entry order to (fill_bi, fill_time, fill_index), or None if it
     never fills.
 
-    market : next bar's open — matches the live 'market order on approval'.
+    market : next bar's open (+ params.entry_delay_bars / entry_delay_frac to
+             model the lag between the Telegram signal and the human tapping
+             Approve) — matches the live 'market order on approval'.
     limit  : rest at sig.entry (the zone proximal); fill the first later bar whose
              range spans it, within SIGNAL_EXPIRY_MINUTES and before the time-exit
              cutoff. If price never returns to the zone, the order cancels — None.
@@ -91,8 +93,12 @@ def _entry_fill(sig, bars: pd.DataFrame, decision_bi: int, decision_time: dateti
         return None
 
     if mode == "market":
-        nxt = bars.iloc[decision_bi + 1]
-        return decision_bi + 1, nxt.date.to_pydatetime(), float(nxt.open)
+        fb = min(decision_bi + 1 + params.entry_delay_bars, n - 1)
+        bar = bars.iloc[fb]
+        px = float(bar.open)
+        if params.entry_delay_frac:
+            px += params.entry_delay_frac * (float(bar.close) - float(bar.open))
+        return fb, bar.date.to_pydatetime(), px
 
     if mode != "limit":
         raise ValueError(f"unknown entry_mode {mode!r}")
