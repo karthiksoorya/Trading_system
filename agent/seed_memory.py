@@ -67,15 +67,18 @@ def _load_all_trades() -> list[dict]:
     rows = [dict(r) for r in cur.fetchall()]
     conn.close()
 
-    # Compute net options P&L where data exists
+    # Compute net options P&L (gross minus execution costs) where data exists
+    from agent.costs import net_options_pnl as _net_pnl, estimate_cost as _est_cost
     for row in rows:
         ep  = row.get("options_entry_price") or 0
         xp  = row.get("options_exit_price")  or 0
         lot = row.get("options_lot_size")     or 0
         if ep and xp and lot:
-            row["net_options_pnl_rs"] = round((xp - ep) * lot, 2)
+            row["net_options_pnl_rs"] = _net_pnl(ep, xp, lot)
+            row["execution_cost_rs"]  = _est_cost(ep, xp, lot)
         else:
             row["net_options_pnl_rs"] = None
+            row["execution_cost_rs"]  = None
 
     return rows
 
@@ -142,9 +145,19 @@ def _aggregate(trades: list[dict]) -> dict:
     # Options P&L (actual trades with data)
     opts_trades = [t for t in actual if t.get("net_options_pnl_rs") is not None]
     if opts_trades:
-        total_opts_pnl = sum(t["net_options_pnl_rs"] for t in opts_trades)
-        opts_summary   = (f"  {len(opts_trades)} trades with options data, "
-                          f"total net P&L = ₹{total_opts_pnl:+,.0f}")
+        total_opts_pnl   = sum(t["net_options_pnl_rs"] for t in opts_trades)
+        total_gross_pnl  = sum(
+            (t.get("options_exit_price", 0) - t.get("options_entry_price", 0))
+            * (t.get("options_lot_size") or 0)
+            for t in opts_trades
+        )
+        total_costs      = sum(t.get("execution_cost_rs", 0) or 0 for t in opts_trades)
+        opts_summary     = (
+            f"  {len(opts_trades)} trades with options data | "
+            f"Gross ₹{total_gross_pnl:+,.0f} | "
+            f"Costs ₹{total_costs:,.0f} | "
+            f"Net ₹{total_opts_pnl:+,.0f}"
+        )
     else:
         opts_summary = "  (no options P&L data available)"
 

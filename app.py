@@ -2519,6 +2519,102 @@ with tab_agent:
 
     st.divider()
 
+    # ── Agent vs Baseline comparison ───────────────────────────────────────
+    st.subheader("📊 Agent vs Baseline Performance")
+    st.caption(
+        "Compares outcomes by agent verdict. SKIP signals show what would have happened "
+        "if taken — a good agent should have SKIP WR < overall WR."
+    )
+
+    try:
+        import sqlite3 as _sq3
+        _aconn = _sq3.connect(str(_Path(__file__).parent / "data" / "trades.db"))
+        _aconn.row_factory = _sq3.Row
+        _rows = _aconn.execute("""
+            SELECT
+                COALESCE(agent_verdict, 'pre-agent') AS verdict,
+                SUM(1) AS total,
+                SUM(CASE WHEN COALESCE(result, sim_outcome) IN ('win','target')    THEN 1 ELSE 0 END) AS wins,
+                SUM(CASE WHEN COALESCE(result, sim_outcome) IN ('loss','stoploss') THEN 1 ELSE 0 END) AS losses,
+                SUM(CASE WHEN COALESCE(result, sim_outcome) NOT IN ('win','target','loss','stoploss') THEN 1 ELSE 0 END) AS neutral,
+                ROUND(AVG(COALESCE(pnl_points, sim_pnl_points)), 2) AS avg_pnl,
+                SUM(CASE WHEN result IS NOT NULL THEN 1 ELSE 0 END) AS actual_ct,
+                SUM(CASE WHEN result IS NULL AND sim_outcome IS NOT NULL THEN 1 ELSE 0 END) AS sim_ct
+            FROM signals
+            WHERE result IS NOT NULL OR sim_outcome IS NOT NULL
+            GROUP BY COALESCE(agent_verdict, 'pre-agent')
+            ORDER BY total DESC
+        """).fetchall()
+        _aconn.close()
+
+        if not _rows:
+            st.info("No signal data yet.")
+        else:
+            _verdict_data = [dict(r) for r in _rows]
+            # Overall baseline (all decided signals)
+            _all_wins   = sum(r["wins"]   for r in _verdict_data)
+            _all_losses = sum(r["losses"] for r in _verdict_data)
+            _baseline_wr = round(_all_wins / (_all_wins + _all_losses) * 100, 1) if (_all_wins + _all_losses) else 0
+
+            _vcols = st.columns(len(_verdict_data) + 1)
+            _vcols[0].metric("Baseline WR", f"{_baseline_wr}%", help="All decided signals, no AI filter")
+
+            _verdict_labels = {
+                "TRADE":      "✅ TRADE",
+                "SKIP":       "🚫 SKIP",
+                "REVIEW":     "⚠️ REVIEW",
+                "pre-agent":  "📅 Pre-agent",
+            }
+            for _i, _vd in enumerate(_verdict_data):
+                _v   = _vd["verdict"]
+                _dec = _vd["wins"] + _vd["losses"]
+                _wr  = round(_vd["wins"] / _dec * 100, 1) if _dec else 0
+                _delta = round(_wr - _baseline_wr, 1) if _v != "pre-agent" else None
+                _vcols[_i + 1].metric(
+                    _verdict_labels.get(_v, _v),
+                    f"{_wr}% WR",
+                    delta=f"{_delta:+.1f}% vs baseline" if _delta is not None else None,
+                    delta_color="normal" if _v == "TRADE" else ("inverse" if _v == "SKIP" else "off"),
+                    help=f"{_vd['total']} signals | {_vd['wins']}W / {_vd['losses']}L / {_vd['neutral']}N | avg {_vd['avg_pnl']:+.1f}pts"
+                )
+
+            # Detailed table
+            import pandas as _pd_agent
+            _df_agent = _pd_agent.DataFrame([
+                {
+                    "Verdict":      _verdict_labels.get(r["verdict"], r["verdict"]),
+                    "Total":        r["total"],
+                    "Actual":       r["actual_ct"],
+                    "Simulated":    r["sim_ct"],
+                    "Wins":         r["wins"],
+                    "Losses":       r["losses"],
+                    "Neutral":      r["neutral"],
+                    "WR %":         f"{round(r['wins']/(r['wins']+r['losses'])*100,1) if (r['wins']+r['losses']) else 0}%",
+                    "Avg PnL pts":  r["avg_pnl"],
+                }
+                for r in _verdict_data
+            ])
+            st.dataframe(_df_agent, use_container_width=True, hide_index=True)
+
+            # Interpretation
+            _skip_rows = [r for r in _verdict_data if r["verdict"] == "SKIP"]
+            if _skip_rows:
+                _sr = _skip_rows[0]
+                _skip_dec = _sr["wins"] + _sr["losses"]
+                _skip_wr  = round(_sr["wins"] / _skip_dec * 100, 1) if _skip_dec else 0
+                if _skip_wr < _baseline_wr - 5:
+                    st.success(f"Agent is adding value: SKIP signals had {_skip_wr}% WR vs {_baseline_wr}% baseline — correctly avoiding poor setups.")
+                elif _skip_wr > _baseline_wr + 5:
+                    st.error(f"Agent may be counterproductive: SKIP signals had {_skip_wr}% WR vs {_baseline_wr}% baseline — skipping winners.")
+                else:
+                    st.info(f"Agent effect is neutral so far: SKIP WR={_skip_wr}% vs baseline {_baseline_wr}%. More data needed.")
+            else:
+                st.info("No SKIP verdicts recorded yet. Data will populate once agent has trained and is evaluating signals.")
+    except Exception as _ae:
+        st.warning(f"Could not load agent performance data: {_ae}")
+
+    st.divider()
+
     # ── Hypothesis tracker ─────────────────────────────────────────────────
     st.subheader("🔬 Hypothesis Tracker")
     st.caption("External rules are tested against live trade data. 20+ signals required to validate or reject.")

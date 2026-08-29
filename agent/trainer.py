@@ -64,17 +64,18 @@ def _load_today_trades() -> list[dict]:
     rows = [dict(r) for r in cur.fetchall()]
     conn.close()
 
-    # Compute net options P&L where data exists
+    # Compute net options P&L (gross minus execution costs) where data exists
+    from agent.costs import net_options_pnl as _net_pnl, estimate_cost as _est_cost
     for row in rows:
         ep  = row.get("options_entry_price") or 0
         xp  = row.get("options_exit_price")  or 0
         lot = row.get("options_lot_size")     or 0
         if ep and xp and lot:
-            # For CE (demand), profit = exit - entry. For PE (supply), price moves
-            # inversely but options_exit_price is already the sell price, so same formula.
-            row["net_options_pnl_rs"] = round((xp - ep) * lot, 2)
+            row["net_options_pnl_rs"] = _net_pnl(ep, xp, lot)
+            row["execution_cost_rs"]  = _est_cost(ep, xp, lot)
         else:
             row["net_options_pnl_rs"] = None
+            row["execution_cost_rs"]  = None
 
     return rows
 
@@ -108,8 +109,11 @@ def _build_prompt(trades: list[dict], memory: dict) -> str:
         for t in trades:
             tag     = "[ACTUAL]" if t["data_type"] == "actual" else "[SIMULATED]"
             outcome = _classify_result(t.get("effective_result"))
-            opts    = (f"  Options P&L=₹{t['net_options_pnl_rs']:+,.0f}"
-                       if t.get("net_options_pnl_rs") is not None else "")
+            if t.get("net_options_pnl_rs") is not None:
+                opts = (f"  Options P&L=₹{t['net_options_pnl_rs']:+,.0f}"
+                        f" (after ₹{t.get('execution_cost_rs',0):.0f} costs)")
+            else:
+                opts = ""
             lines.append(
                 f"  {tag} [{t['zone_class'].upper()} {t['zone_type']} {t['timeframe']}]"
                 f"  Booster={t.get('booster_score',0):.1f}"
