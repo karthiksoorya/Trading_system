@@ -19,6 +19,10 @@ class Zone:
     leg_out: Candle
     touch_count: int = 0
     is_valid: bool = True
+    # ATR-normalized departure strength: leg_out body / 14-period ATR of preceding candles.
+    # Values > 1.5 indicate a strong impulsive departure from the base.
+    # 0.0 when context candles are unavailable (zone at start of series).
+    departure_strength: float = 0.0
 
     @property
     def base_length(self) -> int:
@@ -32,12 +36,77 @@ class Zone:
         return self.touch_count == 0
 
 
+# ── ATR helper ────────────────────────────────────────────────────────────────
+
+def _compute_atr(candles: list[Candle], period: int = 14) -> float:
+    """Average True Range over the last `period` candles.
+
+    Requires at least 2 candles (first candle has no prev_close for True Range).
+    Returns 0.0 if insufficient data.
+    """
+    if len(candles) < 2:
+        return 0.0
+    trs: list[float] = []
+    for i in range(1, len(candles)):
+        tr = max(
+            candles[i].high - candles[i].low,
+            abs(candles[i].high - candles[i - 1].close),
+            abs(candles[i].low  - candles[i - 1].close),
+        )
+        trs.append(tr)
+    tail = trs[-period:]
+    return sum(tail) / len(tail) if tail else 0.0
+
+
+# ── Break of Structure ────────────────────────────────────────────────────────
+
+@dataclass
+class BOS:
+    """A confirmed Break of Structure in a candle series."""
+    direction: str      # "bullish" | "bearish"
+    break_price: float  # the level that was breached (swing high or swing low)
+    confirmed_at: datetime
+
+
+def detect_bos(candles: list[Candle], lookback: int = 20) -> Optional[BOS]:
+    """Detect the most recent Break of Structure in a candle series.
+
+    Bullish BOS : latest candle closes above the highest high of the prior
+                  `lookback` candles — structure has shifted upward.
+    Bearish BOS : latest candle closes below the lowest low of the prior
+                  `lookback` candles — structure has shifted downward.
+
+    Returns None when fewer than 2 candles are supplied or no break is detected.
+    """
+    if len(candles) < 2:
+        return None
+    latest = candles[-1]
+    # Reference window: up to `lookback` candles immediately before the last
+    start = max(0, len(candles) - lookback - 1)
+    reference = candles[start:-1]
+    if not reference:
+        return None
+    highest = max(c.high for c in reference)
+    lowest  = min(c.low  for c in reference)
+    if latest.close > highest:
+        return BOS(direction="bullish", break_price=highest, confirmed_at=latest.timestamp)
+    if latest.close < lowest:
+        return BOS(direction="bearish", break_price=lowest,  confirmed_at=latest.timestamp)
+    return None
+
+
+# ── Zone detection ────────────────────────────────────────────────────────────
+
 def detect_zones(candles: list[Candle], timeframe: str) -> list[Zone]:
     """
     Scan a candle list for DBR / RBR / RBD / DBD patterns.
 
     Pattern: 1 exciting (leg in) → 1+ boring (base) → 1 exciting (leg out)
     Leg in and leg out must always be exciting; base must always be boring.
+
+    Each Zone is annotated with departure_strength (leg_out body / ATR of the
+    candles that preceded the leg_in), giving a volatility-normalized measure
+    of how impulsively price left the base.
     """
     zones: list[Zone] = []
     i = 0
@@ -60,7 +129,8 @@ def detect_zones(candles: list[Candle], timeframe: str) -> list[Zone]:
             continue
 
         leg_out = candles[j]
-        zone = _build_zone(leg_in, base, leg_out, timeframe)
+        # Pass all candles before the leg_in as context for ATR computation
+        zone = _build_zone(leg_in, base, leg_out, timeframe, candles[:i])
         if zone:
             zones.append(zone)
 
@@ -78,6 +148,7 @@ def _build_zone(
     base: list[Candle],
     leg_out: Candle,
     timeframe: str,
+    context_candles: Optional[list[Candle]] = None,
 ) -> Optional[Zone]:
     li_bull = leg_in.is_bullish
     lo_bull = leg_out.is_bullish
@@ -103,6 +174,10 @@ def _build_zone(
         # so it must always be included in the distal pool.
         distal = max(c.high for c in [leg_in] + base + [leg_out])
 
+    # ATR-normalized departure strength
+    atr = _compute_atr(context_candles) if context_candles else 0.0
+    departure_strength = round(leg_out.body / atr, 2) if atr > 0 else 0.0
+
     return Zone(
         zone_type=zone_type,
         zone_class="demand" if is_demand else "supply",
@@ -113,6 +188,7 @@ def _build_zone(
         leg_in=leg_in,
         base_candles=list(base),
         leg_out=leg_out,
+        departure_strength=departure_strength,
     )
 
 
