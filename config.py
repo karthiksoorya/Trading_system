@@ -128,7 +128,11 @@ DATA_DIR.mkdir(exist_ok=True)
 CSV_DIR.mkdir(exist_ok=True)
 
 # ── User settings (overrides above defaults) ──────────────────────────────
-# Written by the Streamlit dashboard; loaded here so the engine picks them up.
+# data/settings.json is the SOURCE OF TRUTH for everything in the _s.get() block
+# below. It is written by the dashboard's "Save Settings" button and is NOT in
+# git. The constants above this line are only fallback defaults for a fresh
+# install — once a key exists in settings.json, editing it here does nothing.
+# To change live behaviour: use the dashboard Settings tab, not this file.
 SETTINGS_FILE = DATA_DIR / "settings.json"
 
 def load_settings():
@@ -154,6 +158,8 @@ SIGNAL_EXPIRY_MINUTES = _s.get("SIGNAL_EXPIRY_MINUTES", SIGNAL_EXPIRY_MINUTES)
 MIN_BOOSTER_SCORE     = _s.get("MIN_BOOSTER_SCORE",     MIN_BOOSTER_SCORE)
 MIN_CONFLUENCE        = _s.get("MIN_CONFLUENCE",         MIN_CONFLUENCE)
 MIN_RISK_POINTS       = _s.get("MIN_RISK_POINTS",        MIN_RISK_POINTS)
+MAX_TRADES_PER_DAY    = _s.get("MAX_TRADES_PER_DAY",    MAX_TRADES_PER_DAY)
+VIX_MAX               = _s.get("VIX_MAX",               VIX_MAX)
 ZONE_APPROACH_POINTS  = _s.get("ZONE_APPROACH_POINTS",  ZONE_APPROACH_POINTS)
 SCAN_TIMEFRAMES       = _s.get("SCAN_TIMEFRAMES",       [TF_LOWER, TF_INTERMEDIATE, TF_HIGHER])
 SCAN_ZONE_CLASSES     = _s.get("SCAN_ZONE_CLASSES",     ["supply"])   # CE off — demand had negative 3y expectancy

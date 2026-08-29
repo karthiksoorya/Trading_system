@@ -536,9 +536,33 @@ with tab_engine:
 
     # ── Settings ──────────────────────────────────────────────────────────
     st.subheader("5. Settings")
-    st.caption("Changes take effect on the next engine start.")
+    st.caption(
+        "This screen is the source of truth — it writes data/settings.json, which "
+        "overrides config.py. Most changes apply on the next scan; broker change needs "
+        "an engine restart."
+    )
 
     _current = config.load_settings()
+
+    with st.expander("📋 Active config right now (settings.json + code defaults merged)"):
+        _eff = {
+            "SCAN_ZONE_CLASSES":    _current.get("SCAN_ZONE_CLASSES", config.SCAN_ZONE_CLASSES),
+            "MIN_BOOSTER_SCORE":    _current.get("MIN_BOOSTER_SCORE", config.MIN_BOOSTER_SCORE),
+            "MIN_CONFLUENCE":       _current.get("MIN_CONFLUENCE", config.MIN_CONFLUENCE),
+            "MIN_RISK_POINTS":      _current.get("MIN_RISK_POINTS", config.MIN_RISK_POINTS),
+            "ZONE_APPROACH_POINTS": _current.get("ZONE_APPROACH_POINTS", config.ZONE_APPROACH_POINTS),
+            "MAX_TRADES_PER_DAY":   _current.get("MAX_TRADES_PER_DAY", config.MAX_TRADES_PER_DAY),
+            "VIX_MAX":              _current.get("VIX_MAX", config.VIX_MAX),
+            "TIME_EXIT_HOUR":       _current.get("TIME_EXIT_HOUR", config.TIME_EXIT_HOUR),
+            "IV_RANK_MAX":          _current.get("IV_RANK_MAX", config.IV_RANK_MAX),
+            "OPTIONS_TRAIL_PCT":    _current.get("OPTIONS_TRAIL_PCT", config.OPTIONS_TRAIL_PCT),
+            "OPTIONS_SL_PCT":       _current.get("OPTIONS_SL_PCT", config.OPTIONS_SL_PCT),
+            "SCAN_WINDOW":          _current.get("SCAN_WINDOW", {"start": "09:15", "end": "10:30"}),
+            "MODE":                 _current.get("MODE", config.MODE),
+        }
+        st.json(_eff)
+        _from_file = [k for k in _eff if k in _current]
+        st.caption(f"From settings.json: {', '.join(_from_file) or 'none'} · rest are code defaults")
 
     # ── Broker ────────────────────────────────────────────────────────────
     _broker_options = ["kite", "upstox"]
@@ -627,6 +651,20 @@ with tab_engine:
         value=_current.get("MIN_CONFLUENCE", config.MIN_CONFLUENCE),
         step=1,
         help="1 = any signal, 2 = confirmed by 2 TFs, 3 = all 3 TFs agree.",
+    )
+
+    col_maxtr, col_vix = st.columns(2)
+    max_trades = col_maxtr.number_input(
+        "Max Trades Per Day",
+        min_value=1, max_value=10, step=1,
+        value=int(_current.get("MAX_TRADES_PER_DAY", config.MAX_TRADES_PER_DAY)),
+        help="Hard daily cap. Once this many trades are taken, no more signals today.",
+    )
+    vix_max = col_vix.number_input(
+        "Max India VIX",
+        min_value=10.0, max_value=40.0, step=0.5,
+        value=float(_current.get("VIX_MAX", config.VIX_MAX)),
+        help="Skip all scans when India VIX is above this. High VIX = inflated premiums.",
     )
 
     st.markdown("**Scan Window** — restrict scanning to specific market hours (IST)")
@@ -771,6 +809,8 @@ with tab_engine:
                 "MIN_RISK_POINTS":       min_risk,
                 "MIN_BOOSTER_SCORE":     min_score,
                 "MIN_CONFLUENCE":        min_conf,
+                "MAX_TRADES_PER_DAY":    max_trades,
+                "VIX_MAX":               vix_max,
                 "SCAN_WINDOW":           {"start": scan_start_time, "end": scan_end_time},
                 "IV_RANK_MAX":           iv_rank_max,
                 "AUTO_FIRST_TRADE":      auto_first,

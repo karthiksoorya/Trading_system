@@ -177,12 +177,14 @@ def scan_now():
 def _scan_core():
     trade_date = get_last_trading_day().isoformat()  # last trading day when closed, today when open
 
-    if trades_today() >= config.MAX_TRADES_PER_DAY:
-        logger.info("Max trades reached for today (%d).", config.MAX_TRADES_PER_DAY)
+    # FIX F: use live settings, not stale module-level values
+    _s_early = config.load_settings()
+
+    _max_trades = _s_early.get("MAX_TRADES_PER_DAY", config.MAX_TRADES_PER_DAY)
+    if trades_today() >= _max_trades:
+        logger.info("Max trades reached for today (%d).", _max_trades)
         return
 
-    # FIX F: use live MAX_DAILY_LOSS from settings, not stale module-level value
-    _s_early = config.load_settings()
     _capital         = _s_early.get("CAPITAL",      config.CAPITAL)
     _max_risk_pct    = _s_early.get("MAX_RISK_PCT",  config.MAX_RISK_PCT)
     _max_daily_loss  = _capital * _max_risk_pct
