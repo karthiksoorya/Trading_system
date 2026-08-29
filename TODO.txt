@@ -60,6 +60,16 @@ Last updated: August 21, 2026
          MAX_TRADES_PER_DAY=2. Also set these in dashboard Settings (settings.json
          overrides config.py on the VPS).
 
+[ ] Backtest option SPREADS vs naked PE vs futures (user request Aug 29)
+      → backtest/replay.py already prices option legs; add a "spread" InstrumentSpec
+         (two legs) + spread cost model (4 orders).
+      → Test: bear put spread (buy 1-ITM PE, sell ~100pt lower) and a deep-ITM
+         debit spread (buy 200-ITM, sell 100-ITM = ~0.9 delta synthetic future).
+      → Question being answered: do spreads cap the -Rs1,500 tail losses / cut
+         theta-IV drag enough to matter? (Expectancy likely similar, variance lower.)
+      → Capital: net debit ~Rs3k-9k/spread + margin buffer -> Rs15k-25k working.
+         LESS than the naked PE they buy now (~Rs7k-12k premium at risk).
+
 [ ] Grow the per-trade edge above the cost floor
       → Even the strict config: +3.5 idx pts/trade, still -Rs308/trade after
          Zerodha costs (STT ~Rs312 on notional). Options lose Rs950-1400/trade.
