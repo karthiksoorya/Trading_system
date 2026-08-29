@@ -41,9 +41,8 @@ def _load_all_trades() -> list[dict]:
     cur = conn.execute("""
         SELECT zone_class, zone_type, timeframe,
                entry, stop_loss, intraday_target,
-               result, exit_reason, pnl,
-               time_signal, date,
-               sim_outcome, sim_pnl
+               result, exit_reason, pnl_points AS pnl,
+               time_signal, date
         FROM signals
         WHERE result IS NOT NULL
         ORDER BY date ASC

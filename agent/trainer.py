@@ -53,12 +53,11 @@ def _build_prompt(trades: list[dict], memory: dict) -> str:
     else:
         lines = []
         for t in trades:
-            sim = f" | SimOutcome={t['sim_outcome']}" if t.get("sim_outcome") else ""
             lines.append(
                 f"  [{t['zone_class'].upper()} {t['zone_type']} {t['timeframe']}]"
                 f"  Entry={t['entry']:.2f} SL={t['stop_loss']:.2f}"
-                f"  Result={t['result'].upper()} PnL={t.get('pnl', 0):+.1f}pts"
-                f"  ExitReason={t.get('exit_reason','?')}{sim}"
+                f"  Result={t['result'].upper()} PnL={t.get('pnl_points', 0):+.1f}pts"
+                f"  ExitReason={t.get('exit_reason','?')}"
             )
         trades_text = "\n".join(lines)
 
