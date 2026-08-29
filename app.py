@@ -2454,9 +2454,11 @@ with tab_agent:
 
                 # For URL type, fetch content first
                 if _ingest_type == "Paste URL":
-                    _content = _fetch_url(_content)
+                    _content, _total_chars = _fetch_url(_content)
+                else:
+                    _total_chars = len(_content)
 
-                _ingest(_ingest_label, _content, _source_type)
+                _ingest(_ingest_label, _content, _source_type, _total_chars)
                 st.success(f"✅ '{_ingest_label}' ingested successfully!")
                 st.rerun()
             except Exception as _e:
@@ -2480,13 +2482,20 @@ with tab_agent:
             except Exception:
                 continue
 
-            with st.expander(f"**{_kd.get('label', _kf.stem)}** — {_kd.get('ingested_at','?')} ({_kd.get('source_type','?')})"):
+            with st.expander(f"**{_kd.get('label', _kf.stem)}** — {_kd.get('ingested_at','?')} | {_kd.get('evidence_type','?')} | conf: {_kd.get('confidence_level','?')}"):
+                st.caption(f"Market: {_kd.get('applicable_market','?')} | Timeframe: {_kd.get('applicable_timeframe','?')} | Status: {'🔵 HYPOTHESIS' if _kd.get('is_hypothesis') else '✅ Validated'}")
                 st.markdown(f"*{_kd.get('summary', '')}*")
 
-                _k1, _k2, _k3 = st.columns(3)
+                _k1, _k2, _k3, _k4 = st.columns(4)
                 _k1.metric("Key Concepts",   len(_kd.get("key_concepts", [])))
                 _k2.metric("Entry Rules",    len(_kd.get("entry_rules", [])))
                 _k3.metric("Zone Filters",   len(_kd.get("zone_quality_filters", [])))
+                _k4.metric("Limitations",    len(_kd.get("limitations", [])))
+
+                if _kd.get("limitations"):
+                    st.markdown("**Limitations / Caveats**")
+                    for _lim in _kd["limitations"]:
+                        st.caption(f"⚠️ {_lim}")
 
                 if _kd.get("key_concepts"):
                     st.markdown("**Key Concepts**")
@@ -2494,7 +2503,7 @@ with tab_agent:
                         st.markdown(f"• {_kc}")
 
                 if _kd.get("entry_rules"):
-                    st.markdown("**Entry Rules**")
+                    st.markdown("**Entry Rules (hypothesis)**")
                     for _er in _kd["entry_rules"]:
                         st.markdown(f"• {_er}")
 
@@ -2510,12 +2519,57 @@ with tab_agent:
 
     st.divider()
 
+    # ── Candidate memory promote ───────────────────────────────────────────
+    st.subheader("📋 Candidate Memory Files")
+    st.caption("Trainer and seeder write candidates — review before promoting to live memory.json.")
+
+    _candidates = sorted(_AGENT_DIR.glob("memory_candidate_*.json"), reverse=True)
+    if not _candidates:
+        st.info("No candidate files yet. Candidates appear after trainer.py or seed_memory.py runs.")
+    else:
+        for _cand in _candidates:
+            try:
+                _cd = _json.loads(_cand.read_text(encoding="utf-8"))
+            except Exception:
+                continue
+            with st.expander(f"**{_cand.name}** — trained: {_cd.get('last_trained','?')}, regime: {_cd.get('market_regime','?')}"):
+                _cc1, _cc2, _cc3 = st.columns(3)
+                _cc1.metric("Mistakes",   len(_cd.get("mistake_log", [])))
+                _cc2.metric("Wins",       len(_cd.get("win_patterns", [])))
+                _cc3.metric("Cautions",   len(_cd.get("caution_flags", [])))
+                with st.expander("Raw candidate JSON"):
+                    st.json(_cd)
+                _col_promote, _col_discard = st.columns(2)
+                if _col_promote.button(f"✅ Promote to Live", key=f"promote_{_cand.stem}", type="primary"):
+                    try:
+                        import subprocess as _sp
+                        import sys as _sys
+                        _pr = _sp.run(
+                            [_sys.executable, str(_AGENT_DIR / "promote_memory.py"),
+                             "--date", _cand.stem.replace("memory_candidate_", ""), "--force"],
+                            capture_output=True, text=True,
+                            cwd=str(_Path(__file__).parent),
+                        )
+                        if _pr.returncode == 0:
+                            st.success("✅ Promoted to memory.json!")
+                        else:
+                            st.error(_pr.stderr[-500:])
+                        st.rerun()
+                    except Exception as _e:
+                        st.error(f"Promote failed: {_e}")
+                if _col_discard.button(f"🗑️ Discard Candidate", key=f"discard_{_cand.stem}"):
+                    _cand.unlink()
+                    st.success("Discarded.")
+                    st.rerun()
+
+    st.divider()
+
     # ── Re-seed memory ─────────────────────────────────────────────────────
     st.subheader("🔄 Re-seed Memory from All Sources")
-    st.caption("Combines all trades + AGENT_KNOWLEDGE.md + ingested sources into a fresh memory.json")
+    st.caption("Combines all trades + AGENT_KNOWLEDGE.md + ingested sources → creates a CANDIDATE file (does NOT overwrite live memory.json). Review above, then promote.")
 
     _can_seed = bool(os.environ.get("ANTHROPIC_API_KEY"))
-    if st.button("🔄 Re-seed Memory Now", disabled=not _can_seed, type="secondary"):
+    if st.button("🔄 Create New Candidate Memory", disabled=not _can_seed, type="secondary"):
         with st.spinner("Claude Sonnet synthesising memory from all sources... (30–60s)"):
             try:
                 import subprocess as _sp
@@ -2526,7 +2580,7 @@ with tab_agent:
                     cwd=str(_Path(__file__).parent),
                 )
                 if _result.returncode == 0:
-                    st.success("✅ Memory re-seeded successfully!")
+                    st.success("✅ Candidate created — review above and promote when ready.")
                     st.code(_result.stdout[-1500:] if len(_result.stdout) > 1500 else _result.stdout)
                 else:
                     st.error("Seeder failed")

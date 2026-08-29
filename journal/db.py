@@ -104,6 +104,12 @@ def _migrate(con):
         ("closed_by",           "TEXT"),
         ("sim_outcome",         "TEXT"),   # target | stoploss | eod — simulated for skipped signals
         ("sim_pnl_points",      "REAL"),   # simulated index P&L — for ML training
+        ("departure_strength",  "REAL"),   # ATR departure at zone origin (x multiples)
+        ("base_compression",    "REAL"),   # base candle compression ratio
+        ("vix_at_signal",       "REAL"),   # India VIX at time of signal
+        ("iv_rank_at_signal",   "REAL"),   # IV rank / percentile at time of signal
+        ("agent_verdict",       "TEXT"),   # TRADE | SKIP | REVIEW — evaluator decision
+        ("agent_reason",        "TEXT"),   # evaluator reason string
     ]
     for col, definition in migrations:
         if col not in existing:
@@ -134,6 +140,7 @@ def log_signal(signal_data: dict) -> int:
                 booster_score, freshness, strength, time_score, rr_score,
                 entry_type, position_size,
                 confluence_count, confluence_tfs,
+                departure_strength, base_compression, vix_at_signal,
                 mode
             ) VALUES (
                 :date, :time_signal, :zone_type, :zone_class, :timeframe,
@@ -142,17 +149,30 @@ def log_signal(signal_data: dict) -> int:
                 :total, :freshness, :strength, :time_score, :rr_score,
                 :entry_type, :position_size,
                 :confluence_count, :confluence_tfs,
+                :departure_strength, :base_compression, :vix_at_signal,
                 :mode
             )
             """,
             {
-                "date":            now.strftime("%Y-%m-%d"),
-                "time_signal":     now.strftime("%H:%M:%S"),
-                "mode":            config.load_settings().get("MODE", config.MODE),  # BUG 4 fix: read live setting not stale module-level value
+                "date":               now.strftime("%Y-%m-%d"),
+                "time_signal":        now.strftime("%H:%M:%S"),
+                "mode":               config.load_settings().get("MODE", config.MODE),  # BUG 4 fix
+                "departure_strength": signal_data.get("departure_strength"),
+                "base_compression":   signal_data.get("base_compression"),
+                "vix_at_signal":      signal_data.get("vix_at_signal"),
                 **signal_data,
             },
         )
         return cur.lastrowid
+
+
+def update_signal_agent_verdict(signal_id: int, verdict: str, reason: str) -> None:
+    """Log the agent's TRADE/SKIP/REVIEW verdict on a signal row."""
+    with _conn() as con:
+        con.execute(
+            "UPDATE signals SET agent_verdict=?, agent_reason=? WHERE id=?",
+            (verdict, reason, signal_id),
+        )
 
 
 def close_trade(

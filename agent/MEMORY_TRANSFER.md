@@ -56,10 +56,12 @@ If you only have `trades.db` (no memory.json backup):
 ```bash
 # On new server, after git pull and pip install
 python3 agent/seed_memory.py
+# Review the candidate file it creates, then promote:
+python3 agent/promote_memory.py
 ```
 
-This rebuilds memory.json from scratch using all historical trades.
-Then re-ingest your external knowledge sources from the Agent tab.
+This creates a candidate memory from all historical trades.
+Review it, promote, then re-ingest your external knowledge sources from the Agent tab.
 
 ---
 
@@ -71,10 +73,11 @@ Then re-ingest your external knowledge sources from the Agent tab.
 [ ] pip install anthropic pdfplumber
 [ ] Copy .env file (KITE, TELEGRAM, ANTHROPIC keys)
 [ ] Copy trades.db  → data/trades.db
-[ ] Copy memory.json → agent/memory.json
-[ ] Copy knowledge/ → agent/knowledge/
-[ ] Run: python3 agent/seed_memory.py  (re-seed from trades + knowledge)
-[ ] Set up cron: 09:00 brief.py, 16:00 trainer.py
+[ ] Copy memory.json → agent/memory.json    (Option A/B only)
+[ ] Copy knowledge/ → agent/knowledge/      (Option A/B only)
+[ ] Option C only: python3 agent/seed_memory.py  (creates candidate)
+[ ] Option C only: python3 agent/promote_memory.py  (review + promote)
+[ ] Set up cron: 09:00 brief.py, 16:00 trainer.py + promote_memory.py
 [ ] Restart scheduler.py
 [ ] Test: python3 agent/brief.py  (should send Telegram message)
 ```

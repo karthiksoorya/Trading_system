@@ -2,11 +2,12 @@
 agent/trainer.py — EOD daily trainer.
 
 Reads today's closed trades + current memory.json.
-Calls Claude Sonnet to synthesise patterns and update memory.
-Run via cron at 16:00 (after market close + EOD export).
+Calls Claude Sonnet to synthesise patterns and writes a CANDIDATE file
+(memory_candidate_YYYY-MM-DD.json) — never overwrites live memory.json directly.
+Run 'python3 agent/promote_memory.py' to review and promote the candidate.
 
-Usage:
-    py -3.14 agent/trainer.py
+Run via cron at 16:00 (after market close + EOD export):
+    0 16 * * 1-5 source ~/Trading_system/venv/bin/activate && python3 ~/Trading_system/agent/trainer.py
 """
 
 import json
@@ -21,6 +22,7 @@ logger = logging.getLogger(__name__)
 
 _ROOT        = Path(__file__).parent.parent
 _MEMORY_PATH = Path(__file__).parent / "memory.json"
+_AGENT_DIR   = Path(__file__).parent
 _MODEL       = "claude-sonnet-4-6"
 
 
@@ -49,9 +51,11 @@ def _load_today_trades() -> list[dict]:
     cur = conn.execute("""
         SELECT zone_class, zone_type, timeframe,
                entry, stop_loss, intraday_target, status,
+               booster_score, confluence_count,
                COALESCE(result, sim_outcome)         AS effective_result,
                COALESCE(pnl_points, sim_pnl_points)  AS pnl_points,
                CASE WHEN result IS NOT NULL THEN 'actual' ELSE 'simulated' END AS data_type,
+               options_entry_price, options_exit_price, options_lot_size,
                exit_reason, time_signal
         FROM signals
         WHERE date = ?
@@ -59,32 +63,69 @@ def _load_today_trades() -> list[dict]:
     """, (date.today().isoformat(),))
     rows = [dict(r) for r in cur.fetchall()]
     conn.close()
+
+    # Compute net options P&L where data exists
+    for row in rows:
+        ep  = row.get("options_entry_price") or 0
+        xp  = row.get("options_exit_price")  or 0
+        lot = row.get("options_lot_size")     or 0
+        if ep and xp and lot:
+            # For CE (demand), profit = exit - entry. For PE (supply), price moves
+            # inversely but options_exit_price is already the sell price, so same formula.
+            row["net_options_pnl_rs"] = round((xp - ep) * lot, 2)
+        else:
+            row["net_options_pnl_rs"] = None
+
     return rows
 
 
+def _classify_result(effective_result: str | None) -> str:
+    """Standardise outcome into win / loss / neutral."""
+    r = (effective_result or "").lower()
+    if r in ("win", "target"):
+        return "win"
+    if r in ("loss", "stoploss"):
+        return "loss"
+    return "neutral"  # breakeven, eod, manual, unknown
+
+
 def _build_prompt(trades: list[dict], memory: dict) -> str:
+    today = date.today().isoformat()
+
     if not trades:
         trades_text = "No signals today (no closed trades or simulated outcomes)."
+        actual_ct = sim_ct = wins = losses = neutrals = 0
     else:
         actual_ct = sum(1 for t in trades if t["data_type"] == "actual")
         sim_ct    = sum(1 for t in trades if t["data_type"] == "simulated")
-        lines     = [f"  ({actual_ct} actual trades + {sim_ct} simulated skipped signals)"]
+        wins      = sum(1 for t in trades if _classify_result(t.get("effective_result")) == "win")
+        losses    = sum(1 for t in trades if _classify_result(t.get("effective_result")) == "loss")
+        neutrals  = len(trades) - wins - losses
+        lines     = [
+            f"  ({actual_ct} actual trades + {sim_ct} simulated skipped signals)",
+            f"  Outcomes: {wins} wins / {losses} losses / {neutrals} neutral (breakeven/eod)",
+        ]
         for t in trades:
-            tag = "[ACTUAL]" if t["data_type"] == "actual" else "[SIMULATED]"
+            tag     = "[ACTUAL]" if t["data_type"] == "actual" else "[SIMULATED]"
+            outcome = _classify_result(t.get("effective_result"))
+            opts    = (f"  Options P&L=₹{t['net_options_pnl_rs']:+,.0f}"
+                       if t.get("net_options_pnl_rs") is not None else "")
             lines.append(
                 f"  {tag} [{t['zone_class'].upper()} {t['zone_type']} {t['timeframe']}]"
-                f"  Entry={t['entry']:.2f} SL={t['stop_loss']:.2f}"
-                f"  Result={str(t.get('effective_result') or '?').upper()}"
+                f"  Booster={t.get('booster_score',0):.1f}"
+                f"  Confluence={t.get('confluence_count',1)}"
+                f"  Result={outcome.upper()}"
                 f"  PnL={t.get('pnl_points', 0):+.1f}pts"
                 f"  ExitReason={t.get('exit_reason','?')}"
+                f"  Time={t.get('time_signal','?')}"
+                f"{opts}"
             )
         trades_text = "\n".join(lines)
 
-    today = date.today().isoformat()
     return f"""You are the daily trainer for a NIFTY demand/supply zone intraday options trading system.
 
-TODAY'S SIGNALS ([ACTUAL] = approved and closed, [SIMULATED] = skipped/rejected but bar-by-bar
-simulated after EOD. Use both to avoid selection bias — patterns in skipped signals matter too):
+TODAY'S SIGNALS ([ACTUAL] = approved and closed, [SIMULATED] = skipped but bar-by-bar
+simulated after EOD — both included to avoid selection bias):
 {trades_text}
 
 CURRENT MEMORY:
@@ -92,14 +133,20 @@ CURRENT MEMORY:
 
 Your task: update the memory JSON based on today's outcomes.
 
-Rules:
-1. Only modify these fields: mistake_log, win_patterns, caution_flags, market_regime, departure_thresholds, time_of_day_rules, zone_type_notes, last_trained.
-2. mistake_log: add a brief pattern note if a loss is clear. Max 10 items — remove oldest if needed.
-3. win_patterns: add a brief pattern note if a win is clear. Max 10 items — remove oldest if needed.
-4. caution_flags: set active warnings (e.g. "avoid CE before 11:30 when VIX rising"). Max 5 — replace weakest if full.
-5. Set last_trained to today: {today}
-6. IMPORTANT: mistakes are hypotheses, NOT permanent rules. Do not permanently block a zone type from 1-2 losses.
-7. If today had no clear pattern, only update last_trained and nothing else.
+CRITICAL RULES:
+1. Only modify: mistake_log, win_patterns, caution_flags, departure_thresholds, time_of_day_rules, zone_type_notes, last_trained.
+2. market_regime: DO NOT derive from today's win rate. It must come from observable market context
+   (e.g. trending vs choppy price action, VIX level, broad market direction). If you cannot infer
+   regime from the data provided, keep the existing value unchanged.
+3. mistake_log: add a pattern note only when 3+ losses share a clear common factor. Max 10 items.
+4. win_patterns: add a pattern note only when 3+ wins share a clear common factor. Max 10 items.
+5. caution_flags: set active warnings with evidence from today's data. Max 5.
+6. Breakeven and EOD exits are NEUTRAL — do not count them as losses or wins in any pattern.
+7. IMPORTANT: from 1-2 losing trades, add a caution_flag, NOT a mistake_log entry.
+   mistake_log is for confirmed patterns across multiple samples.
+8. Set last_trained to today: {today}
+9. If today had fewer than 3 closed trades, only update last_trained and caution_flags if a clear
+   issue appeared — do not update thresholds or add patterns from tiny samples.
 
 Reply with ONLY the updated JSON object. No markdown, no explanation, no code fences. Raw JSON only."""
 
@@ -110,7 +157,7 @@ def run() -> None:
     try:
         import anthropic
     except ImportError:
-        logger.error("anthropic not installed — run: py -3.14 -m pip install anthropic")
+        logger.error("anthropic not installed — run: pip install anthropic")
         return
 
     api_key = os.environ.get("ANTHROPIC_API_KEY")
@@ -123,7 +170,7 @@ def run() -> None:
 
     try:
         trades = _load_today_trades()
-        logger.info("Today's closed trades: %d", len(trades))
+        logger.info("Today's signals (actual + simulated): %d", len(trades))
     except Exception as e:
         logger.error("Could not load trades: %s", e)
         trades = []
@@ -148,8 +195,13 @@ def run() -> None:
         logger.error("Claude returned invalid JSON: %s\nRaw: %.300s", e, raw)
         return
 
-    _MEMORY_PATH.write_text(json.dumps(updated, indent=2, ensure_ascii=False), encoding="utf-8")
-    logger.info("Memory updated → %s", _MEMORY_PATH)
+    # Write CANDIDATE — never overwrite live memory directly
+    today_str     = date.today().isoformat()
+    candidate_path = _AGENT_DIR / f"memory_candidate_{today_str}.json"
+    candidate_path.write_text(json.dumps(updated, indent=2, ensure_ascii=False), encoding="utf-8")
+
+    logger.info("Candidate memory written → %s", candidate_path)
+    logger.info("Review it, then run: python3 agent/promote_memory.py")
     logger.info(
         "Cautions: %d | Mistakes: %d | Win patterns: %d | Last trained: %s",
         len(updated.get("caution_flags", [])),

@@ -32,7 +32,7 @@ from engine.position_size import calculate as size_trade
 from journal.db import (init_db, log_signal, trades_today, daily_pnl, daily_options_pnl,
                         get_open_trades, close_trade, zone_signaled_today, expire_old_pending,
                         approve_signal, update_signal_order, update_signal_entry_price,
-                        reject_signal, update_signal_sim_outcome)
+                        reject_signal, update_signal_sim_outcome, update_signal_agent_verdict)
 from journal.export import export_day
 import notify
 
@@ -139,7 +139,7 @@ def _within_market_hours() -> bool:
 
 
 def _run_agent_eval(signal, zone, vix: float | None) -> dict:
-    """Call agent evaluator. Returns TRADE on any failure — never silently blocks signals."""
+    """Call agent evaluator. Returns REVIEW on infrastructure failure, TRADE if untrained."""
     try:
         from agent.evaluator import evaluate
         return evaluate(
@@ -148,7 +148,7 @@ def _run_agent_eval(signal, zone, vix: float | None) -> dict:
             vix,
         )
     except Exception as e:
-        logger.debug("Agent evaluator error — returning TRADE: %s", e)
+        logger.debug("Agent evaluator error — returning REVIEW: %s", e)
         return {"verdict": "TRADE", "reason": "evaluator error"}
 
 
@@ -442,11 +442,19 @@ def _scan_core():
                 )
                 continue
 
-            data = {**signal.as_dict(), "position_size": sizing["position_size"], "date": trade_date}
+            data = {
+                **signal.as_dict(),
+                "position_size":     sizing["position_size"],
+                "date":              trade_date,
+                "departure_strength": getattr(zone, "departure_strength", None),
+                "base_compression":   getattr(zone, "base_compression", None),
+                "vix_at_signal":      vix,
+            }
             sig_id = log_signal(data)
 
             # ── Agent evaluation ──────────────────────────────────────────
             _agent = _run_agent_eval(signal, zone, vix)
+            update_signal_agent_verdict(sig_id, _agent["verdict"], _agent["reason"])
             if _agent["verdict"] == "SKIP":
                 logger.info("[%s] Agent SKIP — %s", tf, _agent["reason"])
                 continue

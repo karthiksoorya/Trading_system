@@ -3,12 +3,13 @@ agent/seed_memory.py — One-time historical memory seeder.
 
 Reads ALL closed trades from trades.db, aggregates patterns, reads
 AGENT_KNOWLEDGE.md (if present), and asks Claude Sonnet to synthesise
-everything into a rich initial memory.json.
+everything into a CANDIDATE memory file (memory_candidate_YYYY-MM-DD.json).
 
-Run once on the VPS after deploying agentic-v2:
+IMPORTANT: This does NOT overwrite memory.json directly.
+Review the candidate, then run: python3 agent/promote_memory.py
+
+Usage:
     python3 agent/seed_memory.py
-
-Safe to re-run — it asks for confirmation before overwriting memory.json.
 """
 
 import json
@@ -25,12 +26,24 @@ logger = logging.getLogger(__name__)
 
 _ROOT        = Path(__file__).parent.parent
 _MEMORY_PATH = Path(__file__).parent / "memory.json"
+_AGENT_DIR   = Path(__file__).parent
 _DB_PATH     = _ROOT / "data" / "trades.db"
 _KNOWLEDGE   = _ROOT / "AGENT_KNOWLEDGE.md"
 _MODEL       = "claude-sonnet-4-6"
 
 
-# ── Load all closed trades from SQLite directly ───────────────────────────────
+# ── Classify outcome ──────────────────────────────────────────────────────────
+
+def _classify(effective_result: str | None) -> str:
+    r = (effective_result or "").lower()
+    if r in ("win", "target"):
+        return "win"
+    if r in ("loss", "stoploss"):
+        return "loss"
+    return "neutral"   # breakeven, eod, manual, unknown
+
+
+# ── Load all closed trades ────────────────────────────────────────────────────
 
 def _load_all_trades() -> list[dict]:
     if not _DB_PATH.exists():
@@ -40,11 +53,12 @@ def _load_all_trades() -> list[dict]:
     conn.row_factory = sqlite3.Row
     cur = conn.execute("""
         SELECT zone_class, zone_type, timeframe,
-               entry, stop_loss, intraday_target,
-               status,
-               COALESCE(result, sim_outcome)      AS effective_result,
+               entry, stop_loss, intraday_target, status,
+               booster_score, confluence_count,
+               COALESCE(result, sim_outcome)        AS effective_result,
                COALESCE(pnl_points, sim_pnl_points) AS pnl,
                CASE WHEN result IS NOT NULL THEN 'actual' ELSE 'simulated' END AS data_type,
+               options_entry_price, options_exit_price, options_lot_size,
                exit_reason, time_signal, date
         FROM signals
         WHERE result IS NOT NULL OR sim_outcome IS NOT NULL
@@ -52,6 +66,17 @@ def _load_all_trades() -> list[dict]:
     """)
     rows = [dict(r) for r in cur.fetchall()]
     conn.close()
+
+    # Compute net options P&L where data exists
+    for row in rows:
+        ep  = row.get("options_entry_price") or 0
+        xp  = row.get("options_exit_price")  or 0
+        lot = row.get("options_lot_size")     or 0
+        if ep and xp and lot:
+            row["net_options_pnl_rs"] = round((xp - ep) * lot, 2)
+        else:
+            row["net_options_pnl_rs"] = None
+
     return rows
 
 
@@ -62,25 +87,30 @@ def _aggregate(trades: list[dict]) -> dict:
     simulated = [t for t in trades if t["data_type"] == "simulated"]
     total     = len(trades)
 
-    def _wr(rows):
-        wins = sum(1 for t in rows if t["effective_result"] in ("win", "target"))
-        return round(wins / len(rows) * 100, 1) if rows else 0
+    def _stats(rows):
+        wins    = sum(1 for t in rows if _classify(t["effective_result"]) == "win")
+        losses  = sum(1 for t in rows if _classify(t["effective_result"]) == "loss")
+        neutral = len(rows) - wins - losses
+        wr      = round(wins / (wins + losses) * 100, 1) if (wins + losses) else 0
+        return wins, losses, neutral, wr
 
     # By zone type (combined actual + simulated)
-    by_type: dict[str, dict] = defaultdict(lambda: {"wins": 0, "losses": 0, "pnl": 0.0})
+    by_type: dict[str, dict] = defaultdict(lambda: {"wins": 0, "losses": 0, "neutral": 0, "pnl": 0.0})
     for t in trades:
-        k = f"{t['zone_class'].upper()} {t['zone_type']}"
-        is_win = t["effective_result"] in ("win", "target")
-        by_type[k]["wins"]   += 1 if is_win else 0
-        by_type[k]["losses"] += 0 if is_win else 1
-        by_type[k]["pnl"]    += t["pnl"] or 0
+        k      = f"{t['zone_class'].upper()} {t['zone_type']}"
+        outcome = _classify(t["effective_result"])
+        by_type[k]["wins"]    += 1 if outcome == "win"  else 0
+        by_type[k]["losses"]  += 1 if outcome == "loss" else 0
+        by_type[k]["neutral"] += 1 if outcome == "neutral" else 0
+        by_type[k]["pnl"]     += t["pnl"] or 0
 
     type_summary = []
     for k, v in sorted(by_type.items()):
-        n = v["wins"] + v["losses"]
-        wr = round(v["wins"] / n * 100) if n else 0
+        decided = v["wins"] + v["losses"]
+        wr      = round(v["wins"] / decided * 100) if decided else 0
         type_summary.append(
-            f"  {k}: {n} trades, {wr}% WR, {v['pnl']:+.1f}pts PnL"
+            f"  {k}: {decided+v['neutral']} total ({decided} decided, {v['neutral']} neutral) "
+            f"{wr}% WR (wins vs losses), {v['pnl']:+.1f}pts PnL"
         )
 
     # By exit reason (actual trades only)
@@ -89,48 +119,64 @@ def _aggregate(trades: list[dict]) -> dict:
         by_exit[t["exit_reason"] or "unknown"] += 1
     exit_summary = [f"  {k}: {v}" for k, v in sorted(by_exit.items(), key=lambda x: -x[1])]
 
-    # By time of day (all signals — actual + simulated)
-    by_hour: dict[int, dict] = defaultdict(lambda: {"wins": 0, "losses": 0})
+    # By time of day (all signals)
+    by_hour: dict[int, dict] = defaultdict(lambda: {"wins": 0, "losses": 0, "neutral": 0})
     for t in trades:
         try:
-            h   = int((t["time_signal"] or "09:15:00")[:2])
-            win = t["effective_result"] in ("win", "target")
-            by_hour[h]["wins"]   += 1 if win else 0
-            by_hour[h]["losses"] += 0 if win else 1
+            h       = int((t["time_signal"] or "09:15:00")[:2])
+            outcome = _classify(t["effective_result"])
+            by_hour[h][outcome + "s"] += 1
         except Exception:
             pass
 
     hour_summary = []
     for h in sorted(by_hour):
-        v  = by_hour[h]
-        n  = v["wins"] + v["losses"]
-        wr = round(v["wins"] / n * 100) if n else 0
-        hour_summary.append(f"  {h:02d}:xx  {n} signals  {wr}% WR")
+        v       = by_hour[h]
+        decided = v.get("wins", 0) + v.get("losses", 0)
+        wr      = round(v.get("wins", 0) / decided * 100) if decided else 0
+        hour_summary.append(
+            f"  {h:02d}:xx  total={decided+v.get('neutral',0)}"
+            f"  decided={decided}  {wr}% WR  neutral={v.get('neutral',0)}"
+        )
+
+    # Options P&L (actual trades with data)
+    opts_trades = [t for t in actual if t.get("net_options_pnl_rs") is not None]
+    if opts_trades:
+        total_opts_pnl = sum(t["net_options_pnl_rs"] for t in opts_trades)
+        opts_summary   = (f"  {len(opts_trades)} trades with options data, "
+                          f"total net P&L = ₹{total_opts_pnl:+,.0f}")
+    else:
+        opts_summary = "  (no options P&L data available)"
 
     # By zone class
     demand_trades = [t for t in trades if t["zone_class"] == "demand"]
     supply_trades = [t for t in trades if t["zone_class"] == "supply"]
 
+    a_wins, a_losses, a_neutral, a_wr = _stats(actual)
+    s_wins, s_losses, s_neutral, s_wr = _stats(simulated)
+
     return {
-        "summary":   (f"{total} signals total | "
-                      f"{len(actual)} actual trades ({_wr(actual)}% WR) | "
-                      f"{len(simulated)} simulated skipped ({_wr(simulated)}% WR)"),
+        "summary":   (f"{total} total | "
+                      f"{len(actual)} actual ({a_wins}W/{a_losses}L/{a_neutral}N, {a_wr}% WR) | "
+                      f"{len(simulated)} simulated ({s_wins}W/{s_losses}L/{s_neutral}N, {s_wr}% WR)"),
         "by_type":   "\n".join(type_summary) or "  (none)",
         "by_exit":   "\n".join(exit_summary)  or "  (none)",
         "by_hour":   "\n".join(hour_summary)  or "  (none)",
-        "demand_wr": f"{len(demand_trades)} signals, {_wr(demand_trades)}% WR",
-        "supply_wr": f"{len(supply_trades)} signals, {_wr(supply_trades)}% WR",
+        "opts_pnl":  opts_summary,
+        "demand_wr": (f"{len(demand_trades)} signals, "
+                      f"{_stats(demand_trades)[3]}% WR (wins vs decided)"),
+        "supply_wr": (f"{len(supply_trades)} signals, "
+                      f"{_stats(supply_trades)[3]}% WR (wins vs decided)"),
         "actual_ct": len(actual),
         "sim_ct":    len(simulated),
     }
 
 
-# ── Read knowledge file ───────────────────────────────────────────────────────
+# ── Read knowledge ────────────────────────────────────────────────────────────
 
 def _load_knowledge() -> str:
     if _KNOWLEDGE.exists():
         text = _KNOWLEDGE.read_text(encoding="utf-8")
-        # Trim if very long — keep first 4000 chars
         if len(text) > 4000:
             text = text[:4000] + "\n...[truncated]"
         return text
@@ -144,20 +190,23 @@ def _build_prompt(agg: dict, knowledge: str, ext_knowledge: str, current_memory:
     return f"""You are seeding the long-term memory for a NIFTY intraday demand/supply zone options trading agent.
 
 HISTORICAL SIGNAL DATA ({agg['actual_ct']} actual trades + {agg['sim_ct']} simulated skipped signals):
-NOTE: "actual" = trades that were approved and closed. "simulated" = signals that were skipped/rejected
-but bar-by-bar simulated after EOD to see what would have happened. Both are used to avoid selection
-bias — learning only from trades you chose to take would miss patterns in what you skipped.
+NOTE: "actual" = approved and closed. "simulated" = skipped/rejected but bar-by-bar simulated after EOD.
+Both used to avoid selection bias. WR = wins / (wins + losses) — neutral outcomes excluded from WR.
+"Neutral" = breakeven, EOD, or manual exits where outcome was inconclusive.
 
 Overall: {agg['summary']}
 
 By zone type:
 {agg['by_type']}
 
-By exit reason:
+By exit reason (actual trades):
 {agg['by_exit']}
 
 By time of day (hour):
 {agg['by_hour']}
+
+Options P&L (actual trades):
+{agg['opts_pnl']}
 
 Demand zones: {agg['demand_wr']}
 Supply zones:  {agg['supply_wr']}
@@ -165,24 +214,31 @@ Supply zones:  {agg['supply_wr']}
 TRADER'S WRITTEN KNOWLEDGE (AGENT_KNOWLEDGE.md):
 {knowledge}
 
-EXTERNAL REFERENCE KNOWLEDGE (ingested sources — books, articles, tutorials):
+EXTERNAL REFERENCE KNOWLEDGE (hypotheses from ingested sources — not yet validated against this system):
 {ext_knowledge}
 
 CURRENT MEMORY (to merge into, not replace blindly):
 {json.dumps(current_memory, indent=2)}
 
-Your task: produce a rich, updated memory.json that captures the real patterns from the data above.
+Your task: produce a rich, updated memory JSON that captures real patterns from the data above.
 
-Guidelines:
-1. Set market_regime based on overall win rate: >55% = "bullish_edge", 45-55% = "normal", <45% = "choppy"
-2. Set departure_thresholds.min and .preferred based on what you can infer from zone quality
-3. Set time_of_day_rules based on the hourly win rate data — identify good and bad windows
-4. Populate mistake_log with up to 5 real patterns from losing trades (e.g. "DBD supply losses cluster at 09:xx — morning supply often fails")
-5. Populate win_patterns with up to 5 real patterns from winning trades
-6. Set caution_flags (max 5) with the most important active warnings
-7. Set zone_type_notes with a short note per zone type that had meaningful data
-8. Set last_trained to today: {today}
-9. IMPORTANT: be specific — use the actual numbers from the data, not generic advice
+CRITICAL GUIDELINES:
+1. market_regime: set based on observable market conditions implied by the data (price action
+   characteristics, time period, VIX patterns IF mentioned in knowledge). DO NOT derive from
+   win rate alone. Win rate reflects strategy edge, NOT market regime. Default to "normal" if unclear.
+2. departure_thresholds: set based on what the zone quality data shows, or keep existing.
+3. time_of_day_rules: set from the hourly data — identify statistically strong windows.
+   Only flag a time as "avoid" if there are 5+ samples showing consistent losses.
+4. mistake_log: populate with patterns that have 5+ supporting examples. Max 5 entries.
+   Format: "Zone type + condition + outcome — N examples"
+5. win_patterns: populate with patterns that have 5+ supporting examples. Max 5 entries.
+6. caution_flags: set the most important active warnings (max 5). Can have smaller sample backing
+   but must be clearly specific (not generic advice).
+7. zone_type_notes: 1-2 sentence note per zone type with meaningful data (5+ trades).
+8. External knowledge items are HYPOTHESES (not validated for this specific system).
+   Reference them only when they align with the actual data above. Label them as hypothesis.
+9. Set last_trained to today: {today}
+10. Be specific — reference the actual numbers from the data, not generic trading advice.
 
 Reply with ONLY the updated JSON object. No markdown, no explanation. Raw JSON only."""
 
@@ -203,18 +259,16 @@ def run() -> None:
         logger.error("ANTHROPIC_API_KEY not set")
         return
 
-    # Load data
     trades = _load_all_trades()
-    logger.info("Loaded %d closed trades from trades.db", len(trades))
+    logger.info("Loaded %d signals from trades.db", len(trades))
     if not trades:
-        logger.error("No closed trades found — nothing to seed from")
+        logger.error("No signals found — nothing to seed from")
         return
 
     agg       = _aggregate(trades)
     knowledge = _load_knowledge()
     logger.info("Knowledge file: %d chars", len(knowledge))
 
-    # Load current memory
     current_memory: dict = {}
     if _MEMORY_PATH.exists():
         try:
@@ -222,9 +276,11 @@ def run() -> None:
         except Exception:
             pass
 
-    # Confirm before overwriting
     print(f"\n{agg['summary']}")
-    print(f"This will overwrite: {_MEMORY_PATH}")
+    today_str      = datetime.today().strftime("%Y-%m-%d")
+    candidate_path = _AGENT_DIR / f"memory_candidate_{today_str}.json"
+    print(f"This will CREATE a CANDIDATE file: {candidate_path}")
+    print("(memory.json will NOT be touched — use 'python3 agent/promote_memory.py' to promote)")
     confirm = input("Proceed? [y/N] ").strip().lower()
     if confirm != "y":
         logger.info("Aborted.")
@@ -233,7 +289,7 @@ def run() -> None:
     # Load ingested external knowledge
     from agent.ingest import load_all_knowledge
     ext_knowledge = load_all_knowledge()
-    logger.info("External knowledge sources: %s", ext_knowledge[:80] + "..." if len(ext_knowledge) > 80 else ext_knowledge)
+    logger.info("External knowledge: %d chars", len(ext_knowledge))
 
     prompt = _build_prompt(agg, knowledge, ext_knowledge, current_memory)
 
@@ -256,8 +312,8 @@ def run() -> None:
         logger.error("Claude returned invalid JSON: %s\nRaw: %.400s", e, raw)
         return
 
-    _MEMORY_PATH.write_text(json.dumps(updated, indent=2, ensure_ascii=False), encoding="utf-8")
-    logger.info("Memory seeded → %s", _MEMORY_PATH)
+    candidate_path.write_text(json.dumps(updated, indent=2, ensure_ascii=False), encoding="utf-8")
+    logger.info("Candidate written → %s", candidate_path)
     logger.info(
         "Regime: %s | Cautions: %d | Mistakes: %d | Win patterns: %d",
         updated.get("market_regime"),
@@ -265,7 +321,7 @@ def run() -> None:
         len(updated.get("mistake_log", [])),
         len(updated.get("win_patterns", [])),
     )
-    logger.info("=== Seeder complete — review memory.json before next trading day ===")
+    logger.info("=== Seeder complete — review candidate, then run promote_memory.py ===")
 
 
 if __name__ == "__main__":
