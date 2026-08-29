@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "last_trained": null,
+  "last_trained": "2026-08-29",
   "market_regime": "normal",
   "departure_thresholds": {
     "min": 1.0,
