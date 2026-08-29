@@ -182,9 +182,15 @@ cython_debug/
 .cursorignore
 .cursorindexingignore
 
-# Trading system — local data only
-data/
-logs/
+# Trading system — local data only (anchored to repo root so backtest/data/ is unaffected)
+/data/
+/logs/
+
+# Backtest — cached market data + run outputs (large, regenerable)
+backtest/data/cache/
+backtest/reports/
+backtest/**/*.parquet
+backtest/*.csv
 docs/credentials.txt
 .engine.pid
 gdrive_credentials.json
