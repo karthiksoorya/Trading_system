@@ -60,15 +60,15 @@ Last updated: August 21, 2026
          MAX_TRADES_PER_DAY=2. Also set these in dashboard Settings (settings.json
          overrides config.py on the VPS).
 
-[ ] Backtest option SPREADS vs naked PE vs futures (user request Aug 29)
-      → backtest/replay.py already prices option legs; add a "spread" InstrumentSpec
-         (two legs) + spread cost model (4 orders).
-      → Test: bear put spread (buy 1-ITM PE, sell ~100pt lower) and a deep-ITM
-         debit spread (buy 200-ITM, sell 100-ITM = ~0.9 delta synthetic future).
-      → Question being answered: do spreads cap the -Rs1,500 tail losses / cut
-         theta-IV drag enough to matter? (Expectancy likely similar, variance lower.)
-      → Capital: net debit ~Rs3k-9k/spread + margin buffer -> Rs15k-25k working.
-         LESS than the naked PE they buy now (~Rs7k-12k premium at risk).
+[x] Backtest option SPREADS vs naked PE  (CLOSED Aug 29 - margin math settles it)
+      → Ran Zerodha basket_order_margins (SPAN backend) on live account, NIFTY 24175:
+         naked long PE  = Rs 6,113 blocked (= premium, already defined-risk)
+         bear put spread = Rs 34,256 blocked, max loss Rs 2,828, max profit Rs 3,673
+         deep-ITM debit  = Rs 36,167 blocked, tiny max profit
+         NIFTY futures   = Rs 1,77,531 (> whole account; F&O MIS leverage is gone)
+      → Verdict: naked long PE is ALREADY capped-risk (max loss = premium). The
+         spread ties up ~Rs28k MORE capital to shave Rs3k off a worst-case the
+         index SL already prevents, and caps upside. Bad trade. Stay with naked PE.
 
 [ ] Grow the per-trade edge above the cost floor
       → Even the strict config: +3.5 idx pts/trade, still -Rs308/trade after
