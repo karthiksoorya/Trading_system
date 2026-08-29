@@ -344,8 +344,8 @@ def _engine_panel():
 
 # ── Tabs ──────────────────────────────────────────────────────────────────
 _pending_label = f"🔔 Approvals ({pending_count()})" if pending_count() else "🔔 Approvals"
-tab_approvals, tab_engine, tab_signals, tab_performance, tab_learning, tab_tutorial, tab_zones = st.tabs([
-    _pending_label, "🔧 Engine", "📊 Signals", "📈 Performance", "🤖 Learning", "📖 Tutorial", "🔍 Zones"
+tab_approvals, tab_engine, tab_signals, tab_performance, tab_learning, tab_tutorial, tab_zones, tab_agent = st.tabs([
+    _pending_label, "🔧 Engine", "📊 Signals", "📈 Performance", "🤖 Learning", "📖 Tutorial", "🔍 Zones", "🧠 Agent"
 ])
 
 
@@ -2336,3 +2336,201 @@ with tab_zones:
                 "🔵 Blue = compression < 0.5× ATR (very tight base)  |  "
                 "Grey = invalid (zone broken by price)"
             )
+
+# ══════════════════════════════════════════════════════════════════════════
+# TAB 8 — AGENT  (knowledge manager + memory viewer)
+# ══════════════════════════════════════════════════════════════════════════
+with tab_agent:
+    import json as _json
+    from pathlib import Path as _Path
+
+    _AGENT_DIR  = _Path(__file__).parent / "agent"
+    _KB_DIR     = _AGENT_DIR / "knowledge"
+    _MEM_PATH   = _AGENT_DIR / "memory.json"
+    _KB_DIR.mkdir(exist_ok=True)
+
+    st.header("🧠 Agent — Knowledge Manager")
+    st.caption("Upload external sources (PDFs, notes, articles) and view agent memory.")
+
+    # ── Memory viewer ──────────────────────────────────────────────────────
+    with st.expander("📋 Current Memory (memory.json)", expanded=False):
+        if _MEM_PATH.exists():
+            _mem = _json.loads(_MEM_PATH.read_text(encoding="utf-8"))
+            _mc1, _mc2, _mc3, _mc4 = st.columns(4)
+            _mc1.metric("Last Trained",   _mem.get("last_trained") or "never")
+            _mc2.metric("Regime",         _mem.get("market_regime", "—"))
+            _mc3.metric("Caution Flags",  len(_mem.get("caution_flags", [])))
+            _mc4.metric("Mistake Log",    len(_mem.get("mistake_log", [])))
+
+            if _mem.get("caution_flags"):
+                st.markdown("**Active Cautions**")
+                for _cf in _mem["caution_flags"]:
+                    st.warning(_cf)
+
+            if _mem.get("win_patterns"):
+                st.markdown("**Win Patterns**")
+                for _wp in _mem["win_patterns"]:
+                    st.success(_wp)
+
+            if _mem.get("mistake_log"):
+                st.markdown("**Mistake Log**")
+                for _ml in _mem["mistake_log"]:
+                    st.error(_ml)
+
+            with st.expander("Raw JSON"):
+                st.json(_mem)
+        else:
+            st.info("memory.json not found. Run trainer.py first.")
+
+    st.divider()
+
+    # ── Ingest new source ──────────────────────────────────────────────────
+    st.subheader("➕ Ingest New Knowledge Source")
+    _col_left, _col_right = st.columns([2, 1])
+
+    with _col_left:
+        _ingest_label = st.text_input("Label (name for this source)", placeholder="e.g. Sam Seiden Method")
+        _ingest_type  = st.radio("Source type", ["Upload file", "Paste URL", "Paste text"], horizontal=True)
+
+        _content      = None
+        _source_type  = "text"
+
+        if _ingest_type == "Upload file":
+            _up = st.file_uploader(
+                "Upload PDF, TXT, or Markdown",
+                type=["pdf", "txt", "md"],
+                help="Max ~20MB. PDF text is extracted automatically."
+            )
+            if _up:
+                if _up.name.endswith(".pdf"):
+                    try:
+                        import pdfplumber as _pdfplumber
+                        import io as _io
+                        with _pdfplumber.open(_io.BytesIO(_up.read())) as _pdf:
+                            _content = "\n".join(p.extract_text() or "" for p in _pdf.pages)
+                        _source_type = "pdf"
+                    except ImportError:
+                        try:
+                            import pypdf as _pypdf
+                            import io as _io
+                            _reader  = _pypdf.PdfReader(_io.BytesIO(_up.read()))
+                            _content = "\n".join(p.extract_text() or "" for p in _reader.pages)
+                            _source_type = "pdf"
+                        except ImportError:
+                            st.error("PDF support needs pdfplumber: pip install pdfplumber")
+                else:
+                    _content     = _up.read().decode("utf-8", errors="ignore")
+                    _source_type = _up.name.split(".")[-1]
+
+                if _content:
+                    st.caption(f"Extracted {len(_content):,} characters")
+
+        elif _ingest_type == "Paste URL":
+            _url_input = st.text_input("URL", placeholder="https://...")
+            if _url_input:
+                _source_type = "url"
+                _content     = _url_input   # passed as-is; ingest() fetches it
+
+        else:
+            _content     = st.text_area("Paste text / notes here", height=200)
+            _source_type = "text"
+
+    with _col_right:
+        st.markdown("&nbsp;")
+        st.markdown("**Tips**")
+        st.caption("• PDFs: course materials, books, research papers")
+        st.caption("• URLs: articles, blog posts, market analysis")
+        st.caption("• Text: paste your own notes or rules directly")
+        st.caption("• After ingesting, click **Re-seed Memory** below")
+
+    _can_ingest = bool(_ingest_label and _content and os.environ.get("ANTHROPIC_API_KEY"))
+
+    if st.button("⚡ Ingest Source", disabled=not _can_ingest, type="primary"):
+        with st.spinner("Claude is extracting trading insights..."):
+            try:
+                import sys as _sys
+                _sys.path.insert(0, str(_Path(__file__).parent))
+                from agent.ingest import ingest as _ingest, _read_url as _fetch_url
+
+                # For URL type, fetch content first
+                if _ingest_type == "Paste URL":
+                    _content = _fetch_url(_content)
+
+                _ingest(_ingest_label, _content, _source_type)
+                st.success(f"✅ '{_ingest_label}' ingested successfully!")
+                st.rerun()
+            except Exception as _e:
+                st.error(f"Ingest failed: {_e}")
+
+    if not os.environ.get("ANTHROPIC_API_KEY"):
+        st.warning("ANTHROPIC_API_KEY not set — ingest disabled.")
+
+    st.divider()
+
+    # ── Knowledge library ──────────────────────────────────────────────────
+    st.subheader("📚 Knowledge Library")
+
+    _kb_files = sorted(_KB_DIR.glob("*.json"))
+    if not _kb_files:
+        st.info("No sources ingested yet. Upload your first source above.")
+    else:
+        for _kf in _kb_files:
+            try:
+                _kd = _json.loads(_kf.read_text(encoding="utf-8"))
+            except Exception:
+                continue
+
+            with st.expander(f"**{_kd.get('label', _kf.stem)}** — {_kd.get('ingested_at','?')} ({_kd.get('source_type','?')})"):
+                st.markdown(f"*{_kd.get('summary', '')}*")
+
+                _k1, _k2, _k3 = st.columns(3)
+                _k1.metric("Key Concepts",   len(_kd.get("key_concepts", [])))
+                _k2.metric("Entry Rules",    len(_kd.get("entry_rules", [])))
+                _k3.metric("Zone Filters",   len(_kd.get("zone_quality_filters", [])))
+
+                if _kd.get("key_concepts"):
+                    st.markdown("**Key Concepts**")
+                    for _kc in _kd["key_concepts"]:
+                        st.markdown(f"• {_kc}")
+
+                if _kd.get("entry_rules"):
+                    st.markdown("**Entry Rules**")
+                    for _er in _kd["entry_rules"]:
+                        st.markdown(f"• {_er}")
+
+                if _kd.get("cautions"):
+                    st.markdown("**Cautions**")
+                    for _ca in _kd["cautions"]:
+                        st.warning(_ca)
+
+                if st.button(f"🗑️ Remove '{_kd.get('label', _kf.stem)}'", key=f"del_{_kf.stem}"):
+                    _kf.unlink()
+                    st.success("Removed.")
+                    st.rerun()
+
+    st.divider()
+
+    # ── Re-seed memory ─────────────────────────────────────────────────────
+    st.subheader("🔄 Re-seed Memory from All Sources")
+    st.caption("Combines all trades + AGENT_KNOWLEDGE.md + ingested sources into a fresh memory.json")
+
+    _can_seed = bool(os.environ.get("ANTHROPIC_API_KEY"))
+    if st.button("🔄 Re-seed Memory Now", disabled=not _can_seed, type="secondary"):
+        with st.spinner("Claude Sonnet synthesising memory from all sources... (30–60s)"):
+            try:
+                import subprocess as _sp
+                import sys as _sys
+                _result = _sp.run(
+                    [_sys.executable, str(_AGENT_DIR / "seed_memory.py")],
+                    capture_output=True, text=True, input="y\n",
+                    cwd=str(_Path(__file__).parent),
+                )
+                if _result.returncode == 0:
+                    st.success("✅ Memory re-seeded successfully!")
+                    st.code(_result.stdout[-1500:] if len(_result.stdout) > 1500 else _result.stdout)
+                else:
+                    st.error("Seeder failed")
+                    st.code(_result.stderr[-1000:])
+                st.rerun()
+            except Exception as _e:
+                st.error(f"Failed: {_e}")
