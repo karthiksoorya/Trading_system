@@ -59,6 +59,7 @@ def _load_all_trades() -> list[dict]:
                COALESCE(pnl_points, sim_pnl_points) AS pnl,
                CASE WHEN result IS NOT NULL THEN 'actual' ELSE 'simulated' END AS data_type,
                options_entry_price, options_exit_price, options_lot_size,
+               departure_strength, base_compression, vix_at_signal, iv_rank_at_signal,
                exit_reason, time_signal, date
         FROM signals
         WHERE result IS NOT NULL OR sim_outcome IS NOT NULL
@@ -168,20 +169,56 @@ def _aggregate(trades: list[dict]) -> dict:
     a_wins, a_losses, a_neutral, a_wr = _stats(actual)
     s_wins, s_losses, s_neutral, s_wr = _stats(simulated)
 
+    # Zone feature statistics (departure_strength, base_compression, vix_at_signal)
+    def _pct(vals, p):
+        s = sorted(v for v in vals if v is not None)
+        if not s: return None
+        i = int(len(s) * p / 100)
+        return round(s[min(i, len(s)-1)], 2)
+
+    deps  = [t.get("departure_strength") for t in trades]
+    comps = [t.get("base_compression")   for t in trades]
+    vixs  = [t.get("vix_at_signal")      for t in trades]
+    ivrs  = [t.get("iv_rank_at_signal")  for t in trades]
+
+    def _feat_summary(vals, label, unit=""):
+        filled = [v for v in vals if v is not None]
+        if not filled:
+            return f"  {label}: no data recorded yet"
+        return (f"  {label}: n={len(filled)}, "
+                f"p25={_pct(vals,25)}{unit}, median={_pct(vals,50)}{unit}, "
+                f"p75={_pct(vals,75)}{unit}, max={_pct(vals,100)}{unit}")
+
+    # Win vs loss feature medians (for threshold guidance)
+    win_deps  = [t.get("departure_strength") for t in trades if _classify(t["effective_result"])=="win"  and t.get("departure_strength")]
+    loss_deps = [t.get("departure_strength") for t in trades if _classify(t["effective_result"])=="loss" and t.get("departure_strength")]
+    dep_insight = ""
+    if win_deps and loss_deps:
+        dep_insight = (f"\n  Departure WR insight: winners median={_pct(win_deps,50)}x, "
+                       f"losers median={_pct(loss_deps,50)}x")
+
+    zone_features = (
+        _feat_summary(deps,  "Departure strength", "x") + dep_insight + "\n" +
+        _feat_summary(comps, "Base compression",   "x") + "\n" +
+        _feat_summary(vixs,  "VIX at signal") + "\n" +
+        _feat_summary(ivrs,  "IV Rank at signal", "%")
+    )
+
     return {
-        "summary":   (f"{total} total | "
-                      f"{len(actual)} actual ({a_wins}W/{a_losses}L/{a_neutral}N, {a_wr}% WR) | "
-                      f"{len(simulated)} simulated ({s_wins}W/{s_losses}L/{s_neutral}N, {s_wr}% WR)"),
-        "by_type":   "\n".join(type_summary) or "  (none)",
-        "by_exit":   "\n".join(exit_summary)  or "  (none)",
-        "by_hour":   "\n".join(hour_summary)  or "  (none)",
-        "opts_pnl":  opts_summary,
-        "demand_wr": (f"{len(demand_trades)} signals, "
-                      f"{_stats(demand_trades)[3]}% WR (wins vs decided)"),
-        "supply_wr": (f"{len(supply_trades)} signals, "
-                      f"{_stats(supply_trades)[3]}% WR (wins vs decided)"),
-        "actual_ct": len(actual),
-        "sim_ct":    len(simulated),
+        "summary":       (f"{total} total | "
+                          f"{len(actual)} actual ({a_wins}W/{a_losses}L/{a_neutral}N, {a_wr}% WR) | "
+                          f"{len(simulated)} simulated ({s_wins}W/{s_losses}L/{s_neutral}N, {s_wr}% WR)"),
+        "by_type":       "\n".join(type_summary) or "  (none)",
+        "by_exit":       "\n".join(exit_summary)  or "  (none)",
+        "by_hour":       "\n".join(hour_summary)  or "  (none)",
+        "opts_pnl":      opts_summary,
+        "zone_features": zone_features,
+        "demand_wr":     (f"{len(demand_trades)} signals, "
+                          f"{_stats(demand_trades)[3]}% WR (wins vs decided)"),
+        "supply_wr":     (f"{len(supply_trades)} signals, "
+                          f"{_stats(supply_trades)[3]}% WR (wins vs decided)"),
+        "actual_ct":     len(actual),
+        "sim_ct":        len(simulated),
     }
 
 
@@ -204,6 +241,9 @@ def _build_prompt(agg: dict, knowledge: str, ext_knowledge: str, current_memory:
 
 HISTORICAL SIGNAL DATA ({agg['actual_ct']} actual trades + {agg['sim_ct']} simulated skipped signals):
 NOTE: "actual" = approved and closed. "simulated" = skipped/rejected but bar-by-bar simulated after EOD.
+DATA QUALITY WARNING: Simulated outcomes assume the signal's entry price was fillable — there is no confirmation
+that the market traded at that price after the signal fired. Simulated results may be optimistically biased.
+Treat simulated win rates as directional indicators, NOT as ground truth. Weight actual trades more heavily.
 Both used to avoid selection bias. WR = wins / (wins + losses) — neutral outcomes excluded from WR.
 "Neutral" = breakeven, EOD, or manual exits where outcome was inconclusive.
 
@@ -220,6 +260,9 @@ By time of day (hour):
 
 Options P&L (actual trades):
 {agg['opts_pnl']}
+
+Zone features (departure_strength = how far price moved from zone before signal; base_compression = how tight the base was):
+{agg['zone_features']}
 
 Demand zones: {agg['demand_wr']}
 Supply zones:  {agg['supply_wr']}
@@ -320,7 +363,7 @@ def _seed_hypothesis_tracker() -> dict:
                 wr     = wins / total if total else 0
 
                 if total >= 20:
-                    if   wr >= b_wr + 0.10:  status = "validated"
+                    if   wr >= b_wr + 0.10:  status = "historically_promising"
                     elif wr <= b_wr - 0.10:  status = "rejected"
                     else:                     status = "inconclusive"
                 elif total >= 5:
@@ -422,7 +465,7 @@ def run() -> None:
 
     validated = sum(
         1 for src in updated["hypothesis_tracker"].values()
-        for r in src.get("rules", []) if r.get("status") == "validated"
+        for r in src.get("rules", []) if r.get("status") == "historically_promising"
     )
     rejected = sum(
         1 for src in updated["hypothesis_tracker"].values()

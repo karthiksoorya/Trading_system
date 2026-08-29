@@ -410,7 +410,7 @@ def load_all_knowledge(memory: dict | None = None) -> str:
 
             # Validated vs untested rules get different treatment
             validated_rules = [sf["rule"] for sf in d.get("signal_filters", [])
-                               if rule_status.get(sf["rule"]) == "validated"]
+                               if rule_status.get(sf["rule"]) == "historically_promising"]
             rejected_rules  = [sf["rule"] for sf in d.get("signal_filters", [])
                                if rule_status.get(sf["rule"]) == "rejected"]
 
@@ -422,7 +422,7 @@ def load_all_knowledge(memory: dict | None = None) -> str:
             if limits:
                 block += f"  Limitations: {'; '.join(limits[:2])}\n"
             if validated_rules:
-                block += f"  ✅ CONFIRMED by live data: {'; '.join(validated_rules[:3])}\n"
+                block += f"  ✅ HISTORICALLY PROMISING (in-sample only): {'; '.join(validated_rules[:3])}\n"
             if rejected_rules:
                 block += f"  ❌ REJECTED by live data: {'; '.join(rejected_rules[:3])}\n"
 
@@ -437,7 +437,7 @@ def load_all_knowledge(memory: dict | None = None) -> str:
             )
             for r in all_rules[:10]:
                 status = rule_status.get(r, "")
-                prefix = "✅" if status == "validated" else ("❌" if status == "rejected" else "◇")
+                prefix = "✅" if status == "historically_promising" else ("❌" if status == "rejected" else "◇")
                 block += f"  {prefix} {r}\n"
             parts.append(block)
         except Exception:

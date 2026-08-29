@@ -1,8 +1,10 @@
 """
 agent/promote_memory.py — Promote a candidate memory file to live memory.json.
 
-Enforces a shadow-validation gate: the candidate must have been running in shadow
-mode for at least MIN_SHADOW_DAYS trading days before promotion is allowed.
+Enforces a shadow-validation gate before promotion is allowed:
+  • MIN_SHADOW_DAYS distinct trading days
+  • MIN_SHADOW_SIGNALS total signals evaluated
+  • MIN_SKIP_OUTCOMES shadow-only SKIPs with resolved outcomes
 During shadow mode the system evaluates every signal with BOTH live memory and the
 candidate, logs differences to shadow_log.jsonl, and compares outcomes after close.
 
@@ -26,7 +28,10 @@ _AGENT_DIR      = Path(__file__).parent
 _MEMORY_PATH    = _AGENT_DIR / "memory.json"
 _SHADOW_LOG     = _AGENT_DIR / "shadow_log.jsonl"
 _ARCHIVE_DIR    = _AGENT_DIR / "memory_archive"
-_MIN_SHADOW_DAYS = 3    # require this many distinct trading days before allowing promotion
+_MIN_SHADOW_DAYS    = 3   # distinct trading days
+_MIN_SHADOW_SIGNALS = 10  # total signals seen
+_MIN_SKIP_OUTCOMES  = 5   # shadow-only SKIPs with resolved outcomes
+_OVERRIDE_LOG       = _AGENT_DIR / "promote_overrides.log"
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -147,8 +152,9 @@ def _shadow_stats(entries: list[dict]) -> dict:
 
 def _print_shadow_report(candidate_date: str, stats: dict) -> None:
     print(f"\n  Shadow validation for candidate {candidate_date}:")
-    print(f"  Trading days : {stats['days']} / {_MIN_SHADOW_DAYS} required")
-    print(f"  Signals seen : {stats['total']}")
+    print(f"  Trading days  : {stats['days']} / {_MIN_SHADOW_DAYS} required")
+    print(f"  Signals seen  : {stats['total']} / {_MIN_SHADOW_SIGNALS} required")
+    print(f"  Skip outcomes : {stats['skip_outcomes']} / {_MIN_SKIP_OUTCOMES} required")
     print(f"  Agreement    : {stats['agree_rate']}% with live memory")
     print(f"  Divergences  : {stats['divergences']}")
 
@@ -201,7 +207,7 @@ def promote(candidate_path: Path, force: bool = False) -> None:
 
     # Hypothesis tracker summary
     ht            = new_memory.get("hypothesis_tracker", {})
-    h_validated   = sum(1 for s in ht.values() for r in s.get("rules",[]) if r.get("status")=="validated")
+    h_validated   = sum(1 for s in ht.values() for r in s.get("rules",[]) if r.get("status")=="historically_promising")
     h_rejected    = sum(1 for s in ht.values() for r in s.get("rules",[]) if r.get("status")=="rejected")
     h_testing     = sum(1 for s in ht.values() for r in s.get("rules",[]) if r.get("status")=="testing")
     h_untested    = sum(1 for s in ht.values() for r in s.get("rules",[]) if r.get("status")=="untested")
@@ -217,7 +223,7 @@ def promote(candidate_path: Path, force: bool = False) -> None:
     if h_validated:
         for s in ht.values():
             for r in s.get("rules", []):
-                if r.get("status") == "validated":
+                if r.get("status") == "historically_promising":
                     w, l = r.get("wins",0), r.get("losses",0)
                     wr = round(w/(w+l)*100) if (w+l) else 0
                     print(f"    ✅ {r['rule']} ({r.get('signals_tested',0)} signals, {wr}% WR)")
@@ -228,13 +234,45 @@ def promote(candidate_path: Path, force: bool = False) -> None:
     print(_diff_summary(old_memory, new_memory))
 
     # ── Shadow validation gate ────────────────────────────────────────────
-    if not force and stats["days"] < _MIN_SHADOW_DAYS:
-        print(f"\n⛔ Promotion blocked: only {stats['days']} shadow day(s) accumulated "
-              f"(need {_MIN_SHADOW_DAYS}).")
-        print(f"   The scheduler logs shadow verdicts to agent/shadow_log.jsonl each trading day.")
-        print(f"   Re-run promote_memory.py after {_MIN_SHADOW_DAYS - stats['days']} more trading day(s).")
-        print(f"   To bypass: python3 agent/promote_memory.py --force")
+    gate_failures = []
+    if stats["days"] < _MIN_SHADOW_DAYS:
+        gate_failures.append(
+            f"days={stats['days']} < {_MIN_SHADOW_DAYS} required"
+        )
+    if stats["total"] < _MIN_SHADOW_SIGNALS:
+        gate_failures.append(
+            f"signals={stats['total']} < {_MIN_SHADOW_SIGNALS} required"
+        )
+    if stats["skip_outcomes"] < _MIN_SKIP_OUTCOMES:
+        gate_failures.append(
+            f"skip_outcomes={stats['skip_outcomes']} < {_MIN_SKIP_OUTCOMES} required"
+        )
+
+    if gate_failures and not force:
+        print(f"\n⛔ Promotion blocked:")
+        for f in gate_failures:
+            print(f"   • {f}")
+        print(f"\n   The scheduler logs shadow verdicts to agent/shadow_log.jsonl each trading day.")
+        print(f"   To bypass (experts only): python3 agent/promote_memory.py --force")
         return
+
+    if gate_failures and force:
+        # --force: require explicit typed confirmation + log the override
+        print(f"\n⚠️  Gate failures being overridden by --force:")
+        for f in gate_failures:
+            print(f"   • {f}")
+        confirm = input('\nType "FORCE" to confirm override: ').strip()
+        if confirm != "FORCE":
+            print("Aborted — typed confirmation did not match.")
+            return
+        reason = input("Reason for override (logged): ").strip() or "(no reason given)"
+        import datetime as _dt
+        with open(_OVERRIDE_LOG, "a") as _ol:
+            _ol.write(
+                f"{_dt.datetime.now().isoformat()} | candidate={candidate_path.name} | "
+                f"failures={gate_failures} | reason={reason}\n"
+            )
+        print(f"Override logged to {_OVERRIDE_LOG}")
 
     print(f"\nThis will overwrite: {_MEMORY_PATH}")
     if not force:

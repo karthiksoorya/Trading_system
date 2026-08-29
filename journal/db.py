@@ -140,7 +140,7 @@ def log_signal(signal_data: dict) -> int:
                 booster_score, freshness, strength, time_score, rr_score,
                 entry_type, position_size,
                 confluence_count, confluence_tfs,
-                departure_strength, base_compression, vix_at_signal,
+                departure_strength, base_compression, vix_at_signal, iv_rank_at_signal,
                 mode
             ) VALUES (
                 :date, :time_signal, :zone_type, :zone_class, :timeframe,
@@ -149,7 +149,7 @@ def log_signal(signal_data: dict) -> int:
                 :total, :freshness, :strength, :time_score, :rr_score,
                 :entry_type, :position_size,
                 :confluence_count, :confluence_tfs,
-                :departure_strength, :base_compression, :vix_at_signal,
+                :departure_strength, :base_compression, :vix_at_signal, :iv_rank_at_signal,
                 :mode
             )
             """,
@@ -160,6 +160,7 @@ def log_signal(signal_data: dict) -> int:
                 "departure_strength": signal_data.get("departure_strength"),
                 "base_compression":   signal_data.get("base_compression"),
                 "vix_at_signal":      signal_data.get("vix_at_signal"),
+                "iv_rank_at_signal":  signal_data.get("iv_rank_at_signal"),
                 **signal_data,
             },
         )

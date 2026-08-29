@@ -2629,7 +2629,7 @@ with tab_agent:
     if not _ht:
         st.info("No hypotheses tracked yet. Ingest a source and run the trainer to populate.")
     else:
-        _status_emoji = {"validated": "✅", "rejected": "❌", "testing": "🔄", "inconclusive": "⚠️", "untested": "◇"}
+        _status_emoji = {"historically_promising": "✅", "rejected": "❌", "testing": "🔄", "inconclusive": "⚠️", "untested": "◇"}
         for _src_slug, _src in _ht.items():
             rules = _src.get("rules", [])
             if not rules:

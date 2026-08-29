@@ -237,7 +237,7 @@ def _update_hypothesis_tracker(memory: dict, today: str) -> dict:
                     wr    = wins / dec if dec else 0
 
                     if total >= 20:
-                        if   wr >= b_wr + 0.10:  entry["status"] = "validated"
+                        if   wr >= b_wr + 0.10:  entry["status"] = "historically_promising"
                         elif wr <= b_wr - 0.10:  entry["status"] = "rejected"
                         else:                     entry["status"] = "inconclusive"
                     elif total >= 5:
@@ -309,7 +309,7 @@ def run() -> None:
 
     validated = sum(
         1 for src in updated["hypothesis_tracker"].values()
-        for r in src.get("rules", []) if r.get("status") == "validated"
+        for r in src.get("rules", []) if r.get("status") == "historically_promising"
     )
     rejected = sum(
         1 for src in updated["hypothesis_tracker"].values()

@@ -205,3 +205,4 @@ agent/memory_archive/
 agent/shadow_log.jsonl
 agent/eval_log.jsonl
 agent/knowledge/
+agent/promote_overrides.log

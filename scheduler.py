@@ -139,7 +139,7 @@ def _within_market_hours() -> bool:
 
 
 def _run_agent_eval(signal, zone, vix: float | None) -> dict:
-    """Call agent evaluator. Returns REVIEW on infrastructure failure, TRADE if untrained."""
+    """Call agent evaluator. Returns REVIEW on any failure — never silently passes signals."""
     try:
         from agent.evaluator import evaluate
         return evaluate(
@@ -148,8 +148,8 @@ def _run_agent_eval(signal, zone, vix: float | None) -> dict:
             vix,
         )
     except Exception as e:
-        logger.debug("Agent evaluator error — returning REVIEW: %s", e)
-        return {"verdict": "TRADE", "reason": "evaluator error"}
+        logger.warning("Agent evaluator error — returning REVIEW: %s", e)
+        return {"verdict": "REVIEW", "reason": f"evaluator exception: {str(e)[:80]}"}
 
 
 def _run_shadow_eval(signal, zone, vix: float | None, sig_id: int, live_verdict: str) -> None:
@@ -509,6 +509,7 @@ def _scan_core():
                 "departure_strength": getattr(zone, "departure_strength", None),
                 "base_compression":   getattr(zone, "base_compression", None),
                 "vix_at_signal":      vix,
+                "iv_rank_at_signal":  _iv_rank,
             }
             sig_id = log_signal(data)
 
@@ -522,6 +523,7 @@ def _scan_core():
 
             if _agent["verdict"] == "SKIP":
                 logger.info("[%s] Agent SKIP — %s", tf, _agent["reason"])
+                reject_signal(sig_id, f"agent_skip: {_agent['reason'][:120]}")
                 continue
             _agent_note = _agent["reason"] if _agent["verdict"] == "REVIEW" else None
 
