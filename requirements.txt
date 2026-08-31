@@ -4,3 +4,5 @@ schedule
 requests
 python-dotenv
 kiteconnect
+anthropic
+pdfplumber

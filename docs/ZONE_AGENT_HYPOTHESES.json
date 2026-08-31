@@ -1,0 +1,75 @@
+{
+  "version": 1,
+  "created_at": "2026-08-29",
+  "status": "research_only",
+  "live_rule_authority": false,
+  "hypotheses": [
+    {
+      "id": "Z01",
+      "claim": "Zone boundaries near salient NIFTY round numbers have different rejection rates.",
+      "source": "Osler 2001/2003",
+      "source_url": "https://www.newyorkfed.org/research/staff_reports/sr125.html",
+      "market_transfer_risk": "FX evidence must be revalidated on NIFTY",
+      "features_needed": ["distance_to_50", "distance_to_100", "zone_class", "touch_count"],
+      "label": "target_before_stop",
+      "status": "untested"
+    },
+    {
+      "id": "Z02",
+      "claim": "A confirmed distal break predicts continuation and should be modeled separately from zone failure.",
+      "source": "Osler 2001/2003",
+      "source_url": "https://www.newyorkfed.org/research/staff_reports/sr125.html",
+      "market_transfer_risk": "FX evidence must be revalidated on NIFTY",
+      "features_needed": ["break_close_atr", "break_volume_ratio", "touch_count", "zone_age_minutes"],
+      "label": "continuation_after_break",
+      "status": "untested"
+    },
+    {
+      "id": "Z04",
+      "claim": "A small step-ahead entry offset may improve fills relative to an exact prominent price.",
+      "source": "Cellier and Bourghelle 2007",
+      "source_url": "https://papers.ssrn.com/abstract=966454",
+      "market_transfer_risk": "Euronext evidence; requires NSE order-book data",
+      "features_needed": ["entry_offset_ticks", "spread_ticks", "depth_at_boundary", "fill_latency_ms"],
+      "label": "net_expectancy_after_costs",
+      "status": "untested"
+    },
+    {
+      "id": "Z07",
+      "claim": "Temporary liquidity shocks improve short-horizon reversal probability at a zone.",
+      "source": "Heston, Korajczyk and Sadka 2010",
+      "source_url": "https://onlinelibrary.wiley.com/doi/10.1111/j.1540-6261.2010.01573.x",
+      "market_transfer_risk": "US cross-sectional equity evidence; requires NIFTY validation",
+      "features_needed": ["signed_volume_imbalance", "volume_zscore", "spread_ticks", "volatility_zscore"],
+      "label": "target_before_stop",
+      "status": "untested"
+    },
+    {
+      "id": "Z08",
+      "claim": "Some small candle-level zone profits vanish after bid-ask execution costs.",
+      "source": "Heston, Korajczyk and Sadka 2010",
+      "source_url": "https://onlinelibrary.wiley.com/doi/10.1111/j.1540-6261.2010.01573.x",
+      "market_transfer_risk": "Mechanism is credible but must be measured using actual NIFTY option quotes",
+      "features_needed": ["entry_bid", "entry_ask", "exit_bid", "exit_ask", "fees", "slippage"],
+      "label": "net_option_pnl",
+      "status": "untested"
+    }
+  ],
+  "methodology_sources": [
+    {
+      "id": "M01",
+      "title": "Reexamining the Profitability of Technical Analysis with Data Snooping Checks",
+      "url": "https://academic.oup.com/jfec/article-abstract/3/4/606/907780"
+    },
+    {
+      "id": "M02",
+      "title": "The Probability of Backtest Overfitting",
+      "url": "https://papers.ssrn.com/sol3/Papers.cfm?abstract_id=2326253"
+    },
+    {
+      "id": "M03",
+      "title": "The Deflated Sharpe Ratio",
+      "url": "https://papers.ssrn.com/sol3/Delivery.cfm/SSRN_ID2460551_code87814.pdf?abstractid=2460551"
+    }
+  ]
+}

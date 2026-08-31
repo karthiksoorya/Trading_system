@@ -1641,7 +1641,7 @@ with tab_learning:
     st.subheader("📚 Trading Lessons from Live Sessions")
     st.caption("Key patterns and rules extracted from real trades. Updated after each live session.")
 
-    with st.expander("Aug 31, 2026 — Engine crash = missed trading day. Zone detection strengthened.", expanded=True):
+    with st.expander("Aug 31, 2026 — Engine crash = missed trading day. Zone detection + 4-outcome simulation.", expanded=True):
         st.markdown("""
 **0 signals today — engine was down for the entire morning session.**
 
@@ -1665,6 +1665,17 @@ with tab_learning:
 - `MIN_DEPARTURE_STRENGTH=1.0`: leg-out body must be ≥ 1× ATR — weak departures rejected
 - `MIN_ZONE_WIDTH_ATR_MULT=0.3`: zone width must be ≥ 30% of ATR — degenerate thin zones rejected
 - `GAP_MIN_POINTS=2.0`: gap strength scorer now requires a real gap, not float noise
+
+**4-Outcome simulation framing (new):**
+Previously sim outcomes were binary: target or stoploss. Now there are 4 outcomes:
+- **target** — price hit the target before SL
+- **stoploss** — SL hit, price stalled (zone was real, timing was wrong — revisitable)
+- **continuation** — SL hit AND price closed past distal within next 5 bars (zone was false/consumed — avoid this zone type in future)
+- **eod** — neither target nor SL hit by 15:20
+
+This distinction is academically grounded (Osler 2001/2003): stop-loss clusters intensify breakout continuation. A zone that breaks and keeps going is structurally different from a zone that breaks and reverses — the agent now learns to avoid continuation-type zones separately from pure stoploss losses.
+
+Also: fill confirmation added — simulation only tracks outcomes if the first bar after signal time actually trades through the entry price. Removes phantom fills in fast-moving markets.
 
 **Key rule:**
 > Never start the engine from the dashboard for live unattended operation.

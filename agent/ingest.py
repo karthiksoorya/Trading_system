@@ -245,17 +245,18 @@ Reply with ONLY the JSON object. No markdown fences."""
 
 # ── Ingest a source ───────────────────────────────────────────────────────────
 
-def ingest(label: str, content: str, source_type: str, total_chars: int | None = None) -> None:
+def ingest(label: str, content: str, source_type: str, total_chars: int | None = None) -> Path | None:
+    """Extract and persist one source. Return the saved path, or ``None`` on failure."""
     try:
         import anthropic
     except ImportError:
         logger.error("anthropic not installed — run: pip install anthropic")
-        return
+        return None
 
     api_key = os.environ.get("ANTHROPIC_API_KEY")
     if not api_key:
         logger.error("ANTHROPIC_API_KEY not set")
-        return
+        return None
 
     if total_chars is None:
         total_chars = len(content)
@@ -290,13 +291,13 @@ def ingest(label: str, content: str, source_type: str, total_chars: int | None =
         raw = msg.content[0].text.strip()
     except Exception as e:
         logger.error("Claude API call failed: %s", e)
-        return
+        return None
 
     try:
         data = json.loads(raw)
     except json.JSONDecodeError as e:
         logger.error("Claude returned invalid JSON: %s\nRaw: %.300s", e, raw)
-        return
+        return None
 
     # Ensure is_hypothesis is always True for external sources
     data["is_hypothesis"] = True
@@ -339,6 +340,7 @@ def ingest(label: str, content: str, source_type: str, total_chars: int | None =
     print(f"  Testable rules  : {testable_count} (will be validated against live trade data)")
     print(f"  Limitations     : {len(data.get('limitations', []))}")
     print(f"  Summary: {data.get('summary', '')}\n")
+    return out_path
 
 
 # ── List / Remove ─────────────────────────────────────────────────────────────
