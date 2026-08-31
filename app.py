@@ -1641,7 +1641,38 @@ with tab_learning:
     st.subheader("📚 Trading Lessons from Live Sessions")
     st.caption("Key patterns and rules extracted from real trades. Updated after each live session.")
 
-    with st.expander("Aug 29, 2026 — 3-year backtest: the edge does not hold as traded", expanded=True):
+    with st.expander("Aug 31, 2026 — Engine crash = missed trading day. Zone detection strengthened.", expanded=True):
+        st.markdown("""
+**0 signals today — engine was down for the entire morning session.**
+
+**What happened:**
+- Engine started manually via dashboard "Start Engine" button in the morning
+- Dashboard tab closed/reloaded → Streamlit called `init_db()` again → migration tried to add `departure_strength` column which already existed → `sqlite3.OperationalError: duplicate column name` → crash
+- Engine process was tied to the dashboard session — died with it
+- By the time the issue was diagnosed and fixed, market had closed (15:30)
+
+**Fixes applied:**
+1. `journal/db.py`: `_migrate()` now wraps each `ALTER TABLE` in try/except — duplicate column errors silently skipped. Migration is now idempotent regardless of how many times it runs or whether columns already exist.
+2. **VPS cron added**: `5 9 * * 1-5` — starts scheduler.py at 09:05 every weekday if not already running. Engine no longer depends on the dashboard being open.
+3. **VPS DNS fixed**: Added `nameserver 8.8.8.8` to `/etc/resolv.conf` and `127.0.0.1 ip-172-26-4-225` to `/etc/hosts`.
+
+**Settings corrected:**
+- `MIN_CONFLUENCE` lowered from 3 → **2**: all Aug 28 wins (3W) came from confluence=2 setups. Requiring all 3 timeframes to align simultaneously is too restrictive for intraday NIFTY.
+- `MIN_BOOSTER_SCORE` lowered from 10 → **8**: opens Type 2 setups without sacrificing quality.
+
+**Zone detection strengthened (4 new quality filters):**
+- `MIN_BASE_CANDLES=2`: rejects 1-candle "bases" — not real consolidation
+- `MIN_DEPARTURE_STRENGTH=1.0`: leg-out body must be ≥ 1× ATR — weak departures rejected
+- `MIN_ZONE_WIDTH_ATR_MULT=0.3`: zone width must be ≥ 30% of ATR — degenerate thin zones rejected
+- `GAP_MIN_POINTS=2.0`: gap strength scorer now requires a real gap, not float noise
+
+**Key rule:**
+> Never start the engine from the dashboard for live unattended operation.
+> The dashboard can crash, timeout, or reload — taking the engine with it.
+> The cron job is the correct way to run the engine on VPS.
+        """)
+
+    with st.expander("Aug 29, 2026 — 3-year backtest: the edge does not hold as traded", expanded=False):
         st.markdown("""
 Built an offline backtest (`backtest/`) that replays the **real** `engine/` zone logic against
 **3 years of real Kite 5-min Nifty + VIX data**. Futures P&L uses real index data. Full detail:
@@ -2458,9 +2489,16 @@ with tab_agent:
                 else:
                     _total_chars = len(_content)
 
-                _ingest(_ingest_label, _content, _source_type, _total_chars)
-                st.success(f"✅ '{_ingest_label}' ingested successfully!")
-                st.rerun()
+                _saved_path = _ingest(_ingest_label, _content, _source_type, _total_chars)
+                if _saved_path and _Path(_saved_path).exists():
+                    st.success(f"✅ '{_ingest_label}' ingested successfully!")
+                    st.rerun()
+                else:
+                    st.error(
+                        "Ingest did not create a knowledge file. Check that the app's Python "
+                        "environment has the anthropic package and that ANTHROPIC_API_KEY is "
+                        "available, then inspect the Streamlit/server log for the API error."
+                    )
             except Exception as _e:
                 st.error(f"Ingest failed: {_e}")
 
