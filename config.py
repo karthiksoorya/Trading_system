@@ -71,6 +71,14 @@ TF_LOWER        = "5minute"    # entry
 # ── Candle Classification Threshold ───────────────────────────────────────
 EXCITING_CANDLE_BODY_RATIO = 0.50   # body > 50% of range → exciting
 
+# ── Zone Quality Filters ───────────────────────────────────────────────────
+# Applied during zone detection — tighter values = fewer but higher-quality zones.
+# Set a filter to 0 to disable it.
+MIN_BASE_CANDLES        = 2     # minimum boring candles to form a valid base
+MIN_DEPARTURE_STRENGTH  = 1.0   # leg_out body / ATR — rejects weak departures
+MIN_ZONE_WIDTH_ATR_MULT = 0.3   # zone width (proximal−distal) must be ≥ this × ATR
+GAP_MIN_POINTS          = 2.0   # minimum gap (pts) for gap-strength bonus in boosters
+
 # ── Stop Loss Buffer ───────────────────────────────────────────────────────
 # Extra points beyond the distal line to avoid SL being clipped by wicks.
 # Demand: SL = distal - SL_BUFFER_POINTS
@@ -172,3 +180,7 @@ SCAN_TIMEFRAMES       = _s.get("SCAN_TIMEFRAMES",       [TF_LOWER, TF_INTERMEDIA
 SCAN_ZONE_CLASSES     = _s.get("SCAN_ZONE_CLASSES",     ["supply"])   # CE off — demand had negative 3y expectancy
 DAILY_OPTIONS_TARGET  = _s.get("DAILY_OPTIONS_TARGET",  DAILY_OPTIONS_TARGET)
 OPTIONS_SL_PCT        = _s.get("OPTIONS_SL_PCT",         OPTIONS_SL_PCT)
+MIN_BASE_CANDLES        = _s.get("MIN_BASE_CANDLES",        MIN_BASE_CANDLES)
+MIN_DEPARTURE_STRENGTH  = _s.get("MIN_DEPARTURE_STRENGTH",  MIN_DEPARTURE_STRENGTH)
+MIN_ZONE_WIDTH_ATR_MULT = _s.get("MIN_ZONE_WIDTH_ATR_MULT", MIN_ZONE_WIDTH_ATR_MULT)
+GAP_MIN_POINTS          = _s.get("GAP_MIN_POINTS",          GAP_MIN_POINTS)

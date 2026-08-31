@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 
+import config
 from brokers.base import Candle
 from engine.zones import Zone
 
@@ -61,7 +62,12 @@ def score_strength(leg_out: Candle, prev_candles: list[Candle], zone: "Zone | No
     else:
         candle_before_legout = prev_candles[-1]  # fallback (old behaviour)
 
-    gap = abs(leg_out.open - candle_before_legout.close) > 0
+    # Gap threshold: must exceed GAP_MIN_POINTS OR 10% of zone ATR, whichever is larger.
+    # The old check (> 0) fired on any float difference — effectively always true.
+    atr = getattr(zone, "atr", 0.0) if zone is not None else 0.0
+    gap_min = config.load_settings().get("GAP_MIN_POINTS", config.GAP_MIN_POINTS)
+    gap_threshold = max(gap_min, 0.1 * atr) if atr > 0 else gap_min
+    gap = abs(leg_out.open - candle_before_legout.close) > gap_threshold
 
     avg_body = sum(c.body for c in prev_candles) / len(prev_candles)
     explosive = leg_out.body > 2 * avg_body if avg_body > 0 else False

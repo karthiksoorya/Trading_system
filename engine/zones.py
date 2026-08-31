@@ -2,6 +2,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Optional
 
+import config
 from brokers.base import Candle
 from engine.candle import is_boring, is_exciting
 
@@ -28,6 +29,9 @@ class Zone:
     # < 0.5 = very compressed, > 1.5 = loose/sloppy base.
     # 0.0 when context candles are unavailable.
     base_compression: float = 0.0
+    # Raw ATR used to compute the above metrics — stored so downstream scorers
+    # (gap threshold in boosters.py) can use the same volatility baseline.
+    atr: float = 0.0
 
     @property
     def base_length(self) -> int:
@@ -106,13 +110,14 @@ def detect_zones(candles: list[Candle], timeframe: str) -> list[Zone]:
     """
     Scan a candle list for DBR / RBR / RBD / DBD patterns.
 
-    Pattern: 1 exciting (leg in) → 1+ boring (base) → 1 exciting (leg out)
-    Leg in and leg out must always be exciting; base must always be boring.
-
-    Each Zone is annotated with departure_strength (leg_out body / ATR of the
-    candles that preceded the leg_in), giving a volatility-normalized measure
-    of how impulsively price left the base.
+    Pattern: 1 exciting (leg in) → N boring (base, N ≥ MIN_BASE_CANDLES) → 1 exciting (leg out)
+    Zones are filtered by departure_strength and minimum zone width (both ATR-relative).
     """
+    s              = config.load_settings()
+    min_base       = int(s.get("MIN_BASE_CANDLES",        config.MIN_BASE_CANDLES))
+    min_departure  = float(s.get("MIN_DEPARTURE_STRENGTH",  config.MIN_DEPARTURE_STRENGTH))
+    min_width_mult = float(s.get("MIN_ZONE_WIDTH_ATR_MULT", config.MIN_ZONE_WIDTH_ATR_MULT))
+
     zones: list[Zone] = []
     i = 0
 
@@ -129,20 +134,20 @@ def detect_zones(candles: list[Candle], timeframe: str) -> list[Zone]:
             base.append(candles[j])
             j += 1
 
-        if not base or j >= len(candles) or not is_exciting(candles[j]):
+        if len(base) < min_base or j >= len(candles) or not is_exciting(candles[j]):
             i += 1
             continue
 
         leg_out = candles[j]
         # Pass all candles before the leg_in as context for ATR computation
-        zone = _build_zone(leg_in, base, leg_out, timeframe, candles[:i])
+        zone = _build_zone(leg_in, base, leg_out, timeframe, candles[:i],
+                           min_departure=min_departure, min_width_mult=min_width_mult)
         if zone:
             zones.append(zone)
 
         # BUG 9 fix: advance past leg_out to prevent overlapping zones that share
         # a candle. Previously i = j allowed leg_out to immediately become the next
         # leg_in, producing zones with a shared boundary candle.
-        # Starting at j + 1 means we look for a completely fresh pattern next.
         i = j + 1
 
     return zones
@@ -154,6 +159,8 @@ def _build_zone(
     leg_out: Candle,
     timeframe: str,
     context_candles: Optional[list[Candle]] = None,
+    min_departure: float = 0.0,
+    min_width_mult: float = 0.0,
 ) -> Optional[Zone]:
     li_bull = leg_in.is_bullish
     lo_bull = leg_out.is_bullish
@@ -184,6 +191,14 @@ def _build_zone(
     departure_strength = round(leg_out.body / atr, 2) if atr > 0 else 0.0
     base_range = max(c.high for c in base) - min(c.low for c in base)
     base_compression = round(base_range / atr, 2) if atr > 0 else 0.0
+    zone_width = abs(proximal - distal)
+
+    # Quality filters (only applied when ATR is available — zones at series start are kept)
+    if atr > 0:
+        if min_departure > 0 and departure_strength < min_departure:
+            return None   # weak leg-out: price barely left the base
+        if min_width_mult > 0 and zone_width < min_width_mult * atr:
+            return None   # degenerate zone: too thin relative to volatility
 
     return Zone(
         zone_type=zone_type,
@@ -197,6 +212,7 @@ def _build_zone(
         leg_out=leg_out,
         departure_strength=departure_strength,
         base_compression=base_compression,
+        atr=round(atr, 2),
     )
 
 
