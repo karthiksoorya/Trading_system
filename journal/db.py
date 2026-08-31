@@ -113,8 +113,14 @@ def _migrate(con):
     ]
     for col, definition in migrations:
         if col not in existing:
-            con.execute(f"ALTER TABLE signals ADD COLUMN {col} {definition}")
-            logger.info("DB migration: added column %s", col)
+            try:
+                con.execute(f"ALTER TABLE signals ADD COLUMN {col} {definition}")
+                logger.info("DB migration: added column %s", col)
+            except Exception as e:
+                if "duplicate column" in str(e).lower():
+                    pass  # already exists — concurrent init or re-run
+                else:
+                    raise
     # Fix any rows closed before status='closed' was introduced
     con.execute(
         "UPDATE signals SET status='closed' WHERE status='approved' AND exit_price IS NOT NULL"
