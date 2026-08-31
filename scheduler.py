@@ -899,7 +899,14 @@ def _simulate_signal_outcome(signal: dict, candles: list) -> dict:
     never traded in that bar (e.g. signal fired mid-bar and price moved away), the
     simulation returns 'unfilled' with 0 pnl — not counted as a win or loss.
 
-    Returns sim_outcome ('target'|'stoploss'|'eod'|'unfilled') and sim_pnl in points.
+    Outcomes (4-state framing from ZONE_AGENT_EVIDENCE_PACK.md):
+      target       — zone held, price reached target before SL
+      stoploss     — SL hit, but price recovered/stalled (zone was real, trade timing wrong)
+      continuation — SL hit AND price continued past distal for 5+ bars (zone was false/consumed)
+      eod          — neither target nor SL reached by end of session
+      unfilled     — entry price never traded in the first bar after signal
+
+    Returns sim_outcome and sim_pnl in index points.
     """
     sig_time   = signal["time_signal"]          # "HH:MM:SS"
     entry      = signal["entry"]
@@ -922,13 +929,29 @@ def _simulate_signal_outcome(signal: dict, candles: list) -> dict:
     if not filled:
         return {"sim_outcome": "unfilled", "sim_pnl": 0.0}
 
-    for candle in relevant:
+    sl_pnl     = round(sl - entry, 1)     if zone_class == "demand" else round(entry - sl, 1)
+    target_pnl = round(target - entry, 1) if zone_class == "demand" else round(entry - target, 1)
+
+    for idx, candle in enumerate(relevant):
         if zone_class == "demand":
-            if candle.low  <= sl:     return {"sim_outcome": "stoploss", "sim_pnl": round(sl     - entry, 1)}
-            if candle.high >= target: return {"sim_outcome": "target",   "sim_pnl": round(target - entry, 1)}
+            if candle.high >= target:
+                return {"sim_outcome": "target",   "sim_pnl": target_pnl}
+            if candle.low <= sl:
+                # SL hit — check if price continued past distal (breakout, not reversal)
+                distal     = signal.get("distal", sl)
+                post_bars  = relevant[idx + 1: idx + 6]   # up to 5 bars after SL
+                continued  = any(c.close < distal for c in post_bars)
+                outcome    = "continuation" if continued else "stoploss"
+                return {"sim_outcome": outcome, "sim_pnl": sl_pnl}
         else:
-            if candle.high >= sl:     return {"sim_outcome": "stoploss", "sim_pnl": round(entry - sl,     1)}
-            if candle.low  <= target: return {"sim_outcome": "target",   "sim_pnl": round(entry - target, 1)}
+            if candle.low <= target:
+                return {"sim_outcome": "target",   "sim_pnl": target_pnl}
+            if candle.high >= sl:
+                distal     = signal.get("distal", sl)
+                post_bars  = relevant[idx + 1: idx + 6]
+                continued  = any(c.close > distal for c in post_bars)
+                outcome    = "continuation" if continued else "stoploss"
+                return {"sim_outcome": outcome, "sim_pnl": sl_pnl}
 
     last_price = candles[-1].close if candles else entry
     eod_pnl = round((last_price - entry) if zone_class == "demand" else (entry - last_price), 1)

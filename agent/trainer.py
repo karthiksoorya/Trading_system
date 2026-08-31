@@ -81,10 +81,17 @@ def _load_today_trades() -> list[dict]:
 
 
 def _classify_result(effective_result: str | None) -> str:
-    """Standardise outcome into win / loss / neutral."""
+    """Standardise outcome into win / loss / continuation / neutral.
+
+    continuation = SL hit AND price kept going past distal (zone was false/consumed,
+    not a failed reversal). Kept separate from loss so the agent can learn that
+    continuation zones should be avoided entirely, not just "bad timing".
+    """
     r = (effective_result or "").lower()
     if r in ("win", "target"):
         return "win"
+    if r == "continuation":
+        return "continuation"   # zone was false — breakout, not reversal
     if r in ("loss", "stoploss"):
         return "loss"
     return "neutral"  # breakeven, eod, manual, unknown

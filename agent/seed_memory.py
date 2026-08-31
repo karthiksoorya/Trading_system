@@ -38,6 +38,8 @@ def _classify(effective_result: str | None) -> str:
     r = (effective_result or "").lower()
     if r in ("win", "target"):
         return "win"
+    if r == "continuation":
+        return "continuation"   # zone was false — breakout consumed the order
     if r in ("loss", "stoploss"):
         return "loss"
     return "neutral"   # breakeven, eod, manual, unknown
@@ -92,11 +94,12 @@ def _aggregate(trades: list[dict]) -> dict:
     total     = len(trades)
 
     def _stats(rows):
-        wins    = sum(1 for t in rows if _classify(t["effective_result"]) == "win")
-        losses  = sum(1 for t in rows if _classify(t["effective_result"]) == "loss")
-        neutral = len(rows) - wins - losses
-        wr      = round(wins / (wins + losses) * 100, 1) if (wins + losses) else 0
-        return wins, losses, neutral, wr
+        wins         = sum(1 for t in rows if _classify(t["effective_result"]) == "win")
+        losses       = sum(1 for t in rows if _classify(t["effective_result"]) == "loss")
+        continuations= sum(1 for t in rows if _classify(t["effective_result"]) == "continuation")
+        neutral      = len(rows) - wins - losses - continuations
+        wr           = round(wins / (wins + losses) * 100, 1) if (wins + losses) else 0
+        return wins, losses, continuations, neutral, wr
 
     # By zone type (combined actual + simulated)
     by_type: dict[str, dict] = defaultdict(lambda: {"wins": 0, "losses": 0, "neutral": 0, "pnl": 0.0})
@@ -166,8 +169,8 @@ def _aggregate(trades: list[dict]) -> dict:
     demand_trades = [t for t in trades if t["zone_class"] == "demand"]
     supply_trades = [t for t in trades if t["zone_class"] == "supply"]
 
-    a_wins, a_losses, a_neutral, a_wr = _stats(actual)
-    s_wins, s_losses, s_neutral, s_wr = _stats(simulated)
+    a_wins, a_losses, a_cont, a_neutral, a_wr = _stats(actual)
+    s_wins, s_losses, s_cont, s_neutral, s_wr = _stats(simulated)
 
     # Zone feature statistics (departure_strength, base_compression, vix_at_signal)
     def _pct(vals, p):
@@ -206,17 +209,18 @@ def _aggregate(trades: list[dict]) -> dict:
 
     return {
         "summary":       (f"{total} total | "
-                          f"{len(actual)} actual ({a_wins}W/{a_losses}L/{a_neutral}N, {a_wr}% WR) | "
-                          f"{len(simulated)} simulated ({s_wins}W/{s_losses}L/{s_neutral}N, {s_wr}% WR)"),
+                          f"{len(actual)} actual ({a_wins}W/{a_losses}L/{a_cont}C/{a_neutral}N, {a_wr}% WR) | "
+                          f"{len(simulated)} simulated ({s_wins}W/{s_losses}L/{s_cont}C/{s_neutral}N, {s_wr}% WR) | "
+                          f"C=continuation (false zone/breakout)"),
         "by_type":       "\n".join(type_summary) or "  (none)",
         "by_exit":       "\n".join(exit_summary)  or "  (none)",
         "by_hour":       "\n".join(hour_summary)  or "  (none)",
         "opts_pnl":      opts_summary,
         "zone_features": zone_features,
         "demand_wr":     (f"{len(demand_trades)} signals, "
-                          f"{_stats(demand_trades)[3]}% WR (wins vs decided)"),
+                          f"{_stats(demand_trades)[4]}% WR (wins vs decided)"),
         "supply_wr":     (f"{len(supply_trades)} signals, "
-                          f"{_stats(supply_trades)[3]}% WR (wins vs decided)"),
+                          f"{_stats(supply_trades)[4]}% WR (wins vs decided)"),
         "actual_ct":     len(actual),
         "sim_ct":        len(simulated),
     }
