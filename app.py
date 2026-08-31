@@ -2125,28 +2125,27 @@ sudo systemctl restart trading.service
     with st.expander("🖥️ VPS Quick Reference"):
         st.markdown("""
 **Server:** AWS Lightsail Mumbai | IP: 13.201.210.4 | User: ubuntu
+**Engine runs via cron** (`5 9 * * 1-5`) — NOT systemd. Use these commands:
 
 ```bash
 # Check engine status
-sudo systemctl status trading
-
-# Restart engine (always after git pull)
-sudo systemctl restart trading
+ps aux | grep scheduler
 
 # View live logs
-journalctl -u trading -f
+tail -f ~/Trading_system/logs/engine.log
 
-# View today's logs
-journalctl -u trading --since today
+# Pull latest code
+cd ~/Trading_system && git pull origin agentic-v2
 
-# Search logs for order activity
-journalctl -u trading | grep -i "order\\|approve\\|kite\\|error"
+# Restart engine after git pull (kill old, start new)
+pkill -f scheduler.py
+nohup python3 ~/Trading_system/scheduler.py --run >> ~/Trading_system/logs/engine.log 2>&1 &
+echo "Engine PID: $!"
 
-# Backup trades DB
+# Cron restarts engine automatically at 09:05 on weekdays — no manual restart needed overnight
+
+# Backup trades DB (ALWAYS before destructive git ops)
 cp ~/Trading_system/data/trades.db ~/trades_backup_$(date +%Y%m%d).db
-
-# Pull latest code and restart
-cd ~/Trading_system && git pull && sudo systemctl restart trading
 ```
 
 **Ports open in Lightsail firewall:**
