@@ -64,6 +64,50 @@ Write a brief (4-6 lines max):
 Direct trading language. No greetings. Start exactly with: 📋 Morning Brief"""
 
 
+def _apply_regime_settings(memory: dict) -> str:
+    """
+    Auto-update settings.json based on memory regime before engine starts.
+    Returns a summary string of what was changed (for the brief).
+    """
+    sys.path.insert(0, str(_ROOT))
+    import config
+
+    regime   = memory.get("market_regime", "normal").lower()
+    cautions = memory.get("caution_flags", [])
+    tod      = memory.get("time_of_day_rules", {})
+
+    current  = config.load_settings()
+    changes  = {}
+
+    # ── Zone classes based on regime ──────────────────────────────────────
+    if "bullish" in regime:
+        zone_classes = ["demand", "supply"]   # both, demand favored
+    elif "bearish" in regime:
+        zone_classes = ["supply"]             # PE only
+    else:
+        zone_classes = ["demand", "supply"]   # neutral → both
+
+    # Only write if different from current
+    if current.get("SCAN_ZONE_CLASSES") != zone_classes:
+        changes["SCAN_ZONE_CLASSES"] = zone_classes
+
+    # ── Scan end time from time_of_day_rules ──────────────────────────────
+    prefer_before = tod.get("prefer_before")
+    if prefer_before and current.get("SCAN_END") != prefer_before:
+        changes["SCAN_END"] = prefer_before
+
+    if changes:
+        config.save_settings(changes)
+        logger.info("Regime settings applied: %s", changes)
+        parts = []
+        if "SCAN_ZONE_CLASSES" in changes:
+            parts.append(f"zones→{'+'.join(zone_classes)}")
+        if "SCAN_END" in changes:
+            parts.append(f"scan_end→{prefer_before}")
+        return "⚙️ Auto-configured: " + ", ".join(parts)
+    return ""
+
+
 def run() -> None:
     logger.info("=== Morning Brief starting ===")
 
@@ -83,6 +127,9 @@ def run() -> None:
         logger.info("No training yet — skipping brief (run trainer.py first)")
         return
 
+    # Apply regime-based settings before engine starts at 09:05
+    regime_note = _apply_regime_settings(memory)
+
     prompt = _build_prompt(memory)
 
     try:
@@ -96,6 +143,9 @@ def run() -> None:
     except Exception as e:
         logger.error("Claude API call failed: %s", e)
         return
+
+    if regime_note:
+        brief_text += f"\n\n{regime_note}"
 
     logger.info("Brief:\n%s", brief_text)
 
