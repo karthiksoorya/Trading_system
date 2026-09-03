@@ -177,9 +177,16 @@ def is_engine_running() -> bool:
 
 def start_engine():
     config.save_settings({"engine_state": "running"})
+    log_path = config.BASE_DIR / "logs" / "engine.log"
+    log_path.parent.mkdir(exist_ok=True)
+    log_file = open(log_path, "a")
     proc = subprocess.Popen(
-        [sys.executable, str(config.BASE_DIR / "main.py"), "--run"],
+        [sys.executable, str(config.BASE_DIR / "scheduler.py"), "--run"],
         cwd=str(config.BASE_DIR),
+        stdout=log_file,
+        stderr=log_file,
+        stdin=subprocess.DEVNULL,
+        start_new_session=True,  # detach from Streamlit — survives browser close/refresh
     )
     config.ENGINE_PID_FILE.write_text(str(proc.pid))
 
