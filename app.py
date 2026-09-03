@@ -307,12 +307,15 @@ def _engine_panel():
         disabled=running,
         type="primary" if not running else "secondary",
         use_container_width=True,
-        help="Starts the scanner. Waits until 10:05 AM then scans every 5 min.",
+        help="Starts the scanner. Cron auto-starts at 09:05 — only click if not already running.",
     ):
         try:
-            start_engine()
-            st.session_state.engine_on = True
-            st.rerun()
+            if is_engine_running():
+                st.info("Engine is already running (started by cron). No action needed.")
+            else:
+                start_engine()
+                st.session_state.engine_on = True
+                st.rerun()
         except Exception as e:
             st.error(f"Failed to start: {e}")
 
