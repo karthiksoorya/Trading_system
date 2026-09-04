@@ -1651,7 +1651,61 @@ with tab_learning:
     st.subheader("📚 Trading Lessons from Live Sessions")
     st.caption("Key patterns and rules extracted from real trades. Updated after each live session.")
 
-    with st.expander("Aug 31, 2026 — Engine crash = missed trading day. Zone detection + 4-outcome simulation.", expanded=True):
+    with st.expander("Sep 4, 2026 — First trades after fixing engine entry point. Zone type analysis. Morning brief auto-config.", expanded=True):
+        st.markdown("""
+**2 trades. +65 index pts. First day of successful automated trading on VPS after fixing the engine entry point.**
+
+| Trade | Zone | Exit | Index P&L | Options |
+|-------|------|------|-----------|---------|
+| 870 | DBR demand 5min | time_exit 14:00 | **+23.5 pts WIN** | -₹234 (time decay) |
+| 869 | DBD supply 5min | target | **+41.6 pts WIN** | — |
+
+**Root cause of Sep 1–3 silence (days of no signals):**
+VPS cron was running `scheduler.py --run`. The scheduler.py file has **no `--run` argument handler** — it just returns immediately after the token loads.
+Engine appeared to start (token load line in log) but exited in <1 second.
+Fix: cron changed to `main.py --run` — main.py is the correct entry point that actually starts the scan loop.
+
+```bash
+# WRONG (exits immediately):
+python scheduler.py --run
+
+# CORRECT:
+python main.py --run
+```
+
+**Key rule:**
+> Always start the engine with `main.py --run`. Never `scheduler.py --run`. The cron and manual nohup commands must both use main.py.
+
+**Start Engine button fix (`start_new_session=True`):**
+Dashboard "Start Engine" button now uses `start_new_session=True` in `subprocess.Popen`. Engine process is detached from the Streamlit session — browser close/refresh no longer kills the engine.
+
+**Zone type performance analysis (all historical data, 67 closed trades):**
+
+| Zone Type | Class | Trades | Win Rate | Verdict |
+|-----------|-------|--------|----------|---------|
+| DBD | Supply | 11 | **100%** | ✅ Best type |
+| RBR | Demand | 20 | **95%** | ✅ Excellent |
+| DBR | Demand | 33 | **79%** | ✅ Good |
+| RBD | Supply | 3 | **33%** | ❌ DISABLED |
+
+RBD (Rally-Base-Drop) disabled via `DISABLED_ZONE_TYPES: ["RBD"]` in `data/settings.json`. Code feature already existed in scheduler.py — just needed the setting. All future RBD signals are skipped before scoring.
+
+**Morning brief auto-config (intelligence becomes autonomous):**
+`agent/brief.py` now calls `_apply_regime_settings()` before the engine starts at 09:05:
+- Bullish regime → enables demand + supply zones
+- Bearish regime → supply only (PE trades)
+- `time_of_day_rules.prefer_before` → updates `SCAN_WINDOW.end` in settings.json
+
+Morning brief analysis is now acted on automatically — not just sent as information.
+
+**AGENT_EVAL_ENABLED flag added:**
+`data/settings.json` key `AGENT_EVAL_ENABLED: false` bypasses the agent evaluator entirely — signals pass straight through for testing without agent SKIP/REVIEW verdicts.
+
+**settings.template.json committed to git:**
+Since `data/settings.json` is gitignored, a reference copy `settings.template.json` is now in the repo root showing all available keys and current recommended values.
+        """)
+
+    with st.expander("Aug 31, 2026 — Engine crash = missed trading day. Zone detection + 4-outcome simulation.", expanded=False):
         st.markdown("""
 **0 signals today — engine was down for the entire morning session.**
 

@@ -91,10 +91,12 @@ def _apply_regime_settings(memory: dict) -> str:
     if current.get("SCAN_ZONE_CLASSES") != zone_classes:
         changes["SCAN_ZONE_CLASSES"] = zone_classes
 
-    # ── Scan end time from time_of_day_rules ──────────────────────────────
+    # ── Scan window end time from time_of_day_rules ───────────────────────
     prefer_before = tod.get("prefer_before")
-    if prefer_before and current.get("SCAN_END") != prefer_before:
-        changes["SCAN_END"] = prefer_before
+    if prefer_before:
+        current_win = current.get("SCAN_WINDOW", {"start": "09:15", "end": "15:00"})
+        if current_win.get("end") != prefer_before:
+            changes["SCAN_WINDOW"] = {"start": current_win.get("start", "09:15"), "end": prefer_before}
 
     if changes:
         config.save_settings(changes)
@@ -102,7 +104,7 @@ def _apply_regime_settings(memory: dict) -> str:
         parts = []
         if "SCAN_ZONE_CLASSES" in changes:
             parts.append(f"zones→{'+'.join(zone_classes)}")
-        if "SCAN_END" in changes:
+        if "SCAN_WINDOW" in changes:
             parts.append(f"scan_end→{prefer_before}")
         return "⚙️ Auto-configured: " + ", ".join(parts)
     return ""
