@@ -514,18 +514,19 @@ def _scan_core():
             sig_id = log_signal(data)
 
             # ── Agent evaluation ──────────────────────────────────────────
-            _agent = _run_agent_eval(signal, zone, vix)
-            update_signal_agent_verdict(sig_id, _agent["verdict"], _agent["reason"])
-
-            # Shadow eval with candidate memory (non-blocking, logged only)
-            # Runs BEFORE the SKIP gate so it captures every signal including SKIP'd ones
-            _run_shadow_eval(signal, zone, vix, sig_id, _agent["verdict"])
-
-            if _agent["verdict"] == "SKIP":
-                logger.info("[%s] Agent SKIP — %s", tf, _agent["reason"])
-                reject_signal(sig_id, f"agent_skip: {_agent['reason'][:120]}")
-                continue
-            _agent_note = _agent["reason"] if _agent["verdict"] == "REVIEW" else None
+            _agent_enabled = config.load_settings().get("AGENT_EVAL_ENABLED", True)
+            if _agent_enabled:
+                _agent = _run_agent_eval(signal, zone, vix)
+                update_signal_agent_verdict(sig_id, _agent["verdict"], _agent["reason"])
+                _run_shadow_eval(signal, zone, vix, sig_id, _agent["verdict"])
+                if _agent["verdict"] == "SKIP":
+                    logger.info("[%s] Agent SKIP — %s", tf, _agent["reason"])
+                    reject_signal(sig_id, f"agent_skip: {_agent['reason'][:120]}")
+                    continue
+                _agent_note = _agent["reason"] if _agent["verdict"] == "REVIEW" else None
+            else:
+                _agent_note = None
+                logger.info("[%s] Agent eval disabled — passing signal through", tf)
 
             logger.info(
                 "[%s] SIGNAL #%d | %s %s | Score %.1f | Confluence %d TF (%s) | "
