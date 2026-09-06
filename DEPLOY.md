@@ -54,13 +54,31 @@ ssh -i ~/.ssh/LightsailDefaultKey-ap-south-1.pem ubuntu@13.201.210.4
 
 ## What runs automatically (no daily action needed)
 
+### Daily (Mon–Fri)
+
 | Time | What | Script | Log |
 |------|------|--------|-----|
 | 09:00 | Morning brief → Telegram + saves today_context.json | `agents/brief.py` | `logs/brief.log` |
 | 09:05 | Engine starts (if not already running) | `main.py --run` | `logs/engine.log` |
 | 16:00 | After-market trainer → updates memory.json | `agents/trainer.py` | `logs/trainer.log` |
+| 16:15 | Learning ingestion → reflects completed trades into knowledge store | `agents/reflect_completed_trades` | `logs/reflection.log` |
 
-All three are cron jobs. See `crontab.example` for the exact lines.
+### Weekly (Saturday)
+
+| Time | What | Script | Log |
+|------|------|--------|-----|
+| 09:00 | Pattern validation → promotes observed patterns to HYPOTHESIS | `agents/validate_patterns` | `logs/validate_patterns.log` |
+| 09:15 | Hypothesis validation → chronological train/holdout test | `agents/validate_hypotheses` | `logs/validate_hypotheses.log` |
+
+### Manual (human-triggered)
+
+| When | What | How |
+|------|------|-----|
+| After weekly validation | Review surviving candidates | `cat logs/validate_hypotheses.log \| python3 -m json.tool` |
+| After review | Approve a hypothesis → VALIDATED | `agents/review_knowledge.py` or direct store call with `approved=True` |
+| Periodically | Distil validated knowledge into memory.json | Update `agents/memory.json` manually based on validated entries |
+
+All cron jobs are in `crontab.example`. Install with `crontab crontab.example`.
 
 **Daily action required:** Login to Kite before 09:15 via dashboard → Engine tab → Generate Token.
 
