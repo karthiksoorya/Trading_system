@@ -1,5 +1,5 @@
 """
-agent/evaluator.py — Per-signal Claude evaluation.
+agents/evaluator.py — Per-signal Claude evaluation.
 
 Called by scheduler.py when a zone fires. Returns a verdict:
   TRADE  — signal looks good vs memory rules

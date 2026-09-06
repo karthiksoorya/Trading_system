@@ -199,10 +199,10 @@ SYSTEM_LOCAL.md
 AGENT_KNOWLEDGE.md
 
 # Agent runtime files (machine-specific, not shared)
-agent/memory.json
-agent/memory_candidate_*.json
-agent/memory_archive/
-agent/shadow_log.jsonl
-agent/eval_log.jsonl
-agent/knowledge/
-agent/promote_overrides.log
+agents/memory.json
+agents/memory_candidate_*.json
+agents/memory_archive/
+agents/shadow_log.jsonl
+agents/eval_log.jsonl
+agents/knowledge/
+agents/promote_overrides.log

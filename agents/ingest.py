@@ -1,8 +1,8 @@
 """
-agent/ingest.py — Ingest external knowledge sources into agent reference memory.
+agents/ingest.py — Ingest external knowledge sources into agent reference memory.
 
 Reads a source (text file, PDF, markdown, URL) and asks Claude to extract
-trading-specific insights, storing them in agent/knowledge/ as reference.
+trading-specific insights, storing them in agents/knowledge/ as reference.
 The trainer and seeder load these automatically — but they are labelled as
 HYPOTHESES until validated against actual trade data.
 
@@ -11,12 +11,12 @@ applicable market/timeframe, confidence level, and limitations. This lets
 the agent weight external sources appropriately vs proven patterns.
 
 Usage:
-    python3 agent/ingest.py --file "seiden_method.pdf"   --label "Sam Seiden"
-    python3 agent/ingest.py --file "my_notes.md"         --label "My Rules"
-    python3 agent/ingest.py --url  "https://..."         --label "Article"
-    python3 agent/ingest.py --text "..."                 --label "My Observation"
-    python3 agent/ingest.py --list                       (show all sources)
-    python3 agent/ingest.py --remove "Sam Seiden"        (remove a source)
+    python3 agents/ingest.py --file "seiden_method.pdf"   --label "Sam Seiden"
+    python3 agents/ingest.py --file "my_notes.md"         --label "My Rules"
+    python3 agents/ingest.py --url  "https://..."         --label "Article"
+    python3 agents/ingest.py --text "..."                 --label "My Observation"
+    python3 agents/ingest.py --list                       (show all sources)
+    python3 agents/ingest.py --remove "Sam Seiden"        (remove a source)
 """
 
 import argparse

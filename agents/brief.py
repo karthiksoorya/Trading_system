@@ -1,11 +1,11 @@
 """
-agent/brief.py — Morning brief via Telegram.
+agents/brief.py — Morning brief via Telegram.
 
 Reads memory.json, calls Claude Haiku, sends a short daily context message.
 Run via cron at 09:00 (before market open).
 
 Usage:
-    py -3.14 agent/brief.py
+    py -3.14 agents/brief.py
 """
 
 import json

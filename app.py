@@ -2449,7 +2449,7 @@ with tab_agent:
     import json as _json
     from pathlib import Path as _Path
 
-    _AGENT_DIR  = _Path(__file__).parent / "agent"
+    _AGENT_DIR  = _Path(__file__).parent / "agents"
     _KB_DIR     = _AGENT_DIR / "knowledge"
     _MEM_PATH   = _AGENT_DIR / "memory.json"
     _KB_DIR.mkdir(exist_ok=True)
@@ -2555,7 +2555,7 @@ with tab_agent:
             try:
                 import sys as _sys
                 _sys.path.insert(0, str(_Path(__file__).parent))
-                from agent.ingest import ingest as _ingest, _read_url as _fetch_url
+                from agents.ingest import ingest as _ingest, _read_url as _fetch_url
 
                 # For URL type, fetch content first
                 if _ingest_type == "Paste URL":

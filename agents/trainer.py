@@ -1,13 +1,13 @@
 """
-agent/trainer.py — EOD daily trainer.
+agents/trainer.py — EOD daily trainer.
 
 Reads today's closed trades + current memory.json.
 Calls Claude Sonnet to synthesise patterns and writes a CANDIDATE file
 (memory_candidate_YYYY-MM-DD.json) — never overwrites live memory.json directly.
-Run 'python3 agent/promote_memory.py' to review and promote the candidate.
+Run 'python3 agents/promote_memory.py' to review and promote the candidate.
 
 Run via cron at 16:00 (after market close + EOD export):
-    0 16 * * 1-5 source ~/Trading_system/venv/bin/activate && python3 ~/Trading_system/agent/trainer.py
+    0 16 * * 1-5 source ~/Trading_system/venv/bin/activate && python3 ~/Trading_system/agents/trainer.py
 """
 
 import json
@@ -65,7 +65,7 @@ def _load_today_trades() -> list[dict]:
     conn.close()
 
     # Compute net options P&L (gross minus execution costs) where data exists
-    from agent.costs import net_options_pnl as _net_pnl, estimate_cost as _est_cost
+    from agents.costs import net_options_pnl as _net_pnl, estimate_cost as _est_cost
     for row in rows:
         ep  = row.get("options_entry_price") or 0
         xp  = row.get("options_exit_price")  or 0
@@ -164,7 +164,7 @@ Reply with ONLY the updated JSON object. No markdown, no explanation, no code fe
 
 def _update_hypothesis_tracker(memory: dict, today: str) -> dict:
     """
-    For each testable hypothesis filter in agent/knowledge/*.json,
+    For each testable hypothesis filter in agents/knowledge/*.json,
     count today's signal matches and update win/loss tallies.
     Promotes hypothesis status when 20+ signals have been tested.
     """
@@ -329,7 +329,7 @@ def run() -> None:
     candidate_path.write_text(json.dumps(updated, indent=2, ensure_ascii=False), encoding="utf-8")
 
     logger.info("Candidate memory written → %s", candidate_path)
-    logger.info("Review it, then run: python3 agent/promote_memory.py")
+    logger.info("Review it, then run: python3 agents/promote_memory.py")
     logger.info(
         "Cautions: %d | Mistakes: %d | Win patterns: %d | Last trained: %s",
         len(updated.get("caution_flags", [])),

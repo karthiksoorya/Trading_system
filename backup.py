@@ -67,7 +67,7 @@ def run_backup() -> bool:
             return False
 
         # Also back up agent memory if it exists
-        memory_path = config.BASE_DIR / "agent" / "memory.json"
+        memory_path = config.BASE_DIR / "agents" / "memory.json"
         if memory_path.exists():
             try:
                 mem_filename = f"memory_{now_str}.json"

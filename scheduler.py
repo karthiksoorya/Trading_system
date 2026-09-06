@@ -141,7 +141,7 @@ def _within_market_hours() -> bool:
 def _run_agent_eval(signal, zone, vix: float | None) -> dict:
     """Call agent evaluator. Returns REVIEW on any failure — never silently passes signals."""
     try:
-        from agent.evaluator import evaluate
+        from agents.evaluator import evaluate
         return evaluate(
             signal.as_dict(),
             {"departure_strength": zone.departure_strength, "base_compression": zone.base_compression},
@@ -163,7 +163,7 @@ def _run_shadow_eval(signal, zone, vix: float | None, sig_id: int, live_verdict:
     from datetime import datetime as _dt
     from pathlib import Path as _Path
 
-    agent_dir  = _Path(__file__).parent / "agent"
+    agent_dir  = _Path(__file__).parent / "agents"
     candidates = sorted(agent_dir.glob("memory_candidate_*.json"), reverse=True)
     if not candidates:
         return
@@ -178,7 +178,7 @@ def _run_shadow_eval(signal, zone, vix: float | None, sig_id: int, live_verdict:
         return
 
     try:
-        from agent.evaluator import evaluate_with_memory as _eshadow
+        from agents.evaluator import evaluate_with_memory as _eshadow
         shadow = _eshadow(
             signal.as_dict(),
             {"departure_strength": getattr(zone, "departure_strength", None),

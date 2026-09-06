@@ -1,15 +1,15 @@
 """
-agent/seed_memory.py — One-time historical memory seeder.
+agents/seed_memory.py — One-time historical memory seeder.
 
 Reads ALL closed trades from trades.db, aggregates patterns, reads
 AGENT_KNOWLEDGE.md (if present), and asks Claude Sonnet to synthesise
 everything into a CANDIDATE memory file (memory_candidate_YYYY-MM-DD.json).
 
 IMPORTANT: This does NOT overwrite memory.json directly.
-Review the candidate, then run: python3 agent/promote_memory.py
+Review the candidate, then run: python3 agents/promote_memory.py
 
 Usage:
-    python3 agent/seed_memory.py
+    python3 agents/seed_memory.py
 """
 
 import json
@@ -71,7 +71,7 @@ def _load_all_trades() -> list[dict]:
     conn.close()
 
     # Compute net options P&L (gross minus execution costs) where data exists
-    from agent.costs import net_options_pnl as _net_pnl, estimate_cost as _est_cost
+    from agents.costs import net_options_pnl as _net_pnl, estimate_cost as _est_cost
     for row in rows:
         ep  = row.get("options_entry_price") or 0
         xp  = row.get("options_exit_price")  or 0
@@ -431,14 +431,14 @@ def run() -> None:
     today_str      = datetime.today().strftime("%Y-%m-%d")
     candidate_path = _AGENT_DIR / f"memory_candidate_{today_str}.json"
     print(f"This will CREATE a CANDIDATE file: {candidate_path}")
-    print("(memory.json will NOT be touched — use 'python3 agent/promote_memory.py' to promote)")
+    print("(memory.json will NOT be touched — use 'python3 agents/promote_memory.py' to promote)")
     confirm = input("Proceed? [y/N] ").strip().lower()
     if confirm != "y":
         logger.info("Aborted.")
         return
 
     # Load ingested external knowledge (pass current memory for validation status)
-    from agent.ingest import load_all_knowledge
+    from agents.ingest import load_all_knowledge
     ext_knowledge = load_all_knowledge(current_memory)
     logger.info("External knowledge: %d chars", len(ext_knowledge))
 

@@ -1,5 +1,5 @@
 """
-agent/promote_memory.py — Promote a candidate memory file to live memory.json.
+agents/promote_memory.py — Promote a candidate memory file to live memory.json.
 
 Enforces a shadow-validation gate before promotion is allowed:
   • MIN_SHADOW_DAYS distinct trading days
@@ -9,11 +9,11 @@ During shadow mode the system evaluates every signal with BOTH live memory and t
 candidate, logs differences to shadow_log.jsonl, and compares outcomes after close.
 
 Usage:
-    python3 agent/promote_memory.py                      # promote latest candidate
-    python3 agent/promote_memory.py --date 2026-08-29    # promote specific date
-    python3 agent/promote_memory.py --list               # list candidates + shadow stats
-    python3 agent/promote_memory.py --force              # skip day-count gate
-    python3 agent/promote_memory.py --shadow-report      # just show shadow stats, no promote
+    python3 agents/promote_memory.py                      # promote latest candidate
+    python3 agents/promote_memory.py --date 2026-08-29    # promote specific date
+    python3 agents/promote_memory.py --list               # list candidates + shadow stats
+    python3 agents/promote_memory.py --force              # skip day-count gate
+    python3 agents/promote_memory.py --shadow-report      # just show shadow stats, no promote
 """
 
 import argparse
@@ -252,8 +252,8 @@ def promote(candidate_path: Path, force: bool = False) -> None:
         print(f"\n⛔ Promotion blocked:")
         for f in gate_failures:
             print(f"   • {f}")
-        print(f"\n   The scheduler logs shadow verdicts to agent/shadow_log.jsonl each trading day.")
-        print(f"   To bypass (experts only): python3 agent/promote_memory.py --force")
+        print(f"\n   The scheduler logs shadow verdicts to agents/shadow_log.jsonl each trading day.")
+        print(f"   To bypass (experts only): python3 agents/promote_memory.py --force")
         return
 
     if gate_failures and force:

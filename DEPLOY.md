@@ -21,8 +21,8 @@ ssh -i ~/.ssh/LightsailDefaultKey-ap-south-1.pem ubuntu@13.201.210.4
 ## Daily Pipeline — How Intelligence Flows
 
 ```
-09:00  agent/brief.py
-       READS:  agent/memory.json
+09:00  agents/brief.py
+       READS:  agents/memory.json
        CALLS:  Claude Haiku (brief generation)
        WRITES: data/today_context.json   ← today's regime, cautions, key levels
                data/settings.json       ← regime auto-config (zone classes, scan window)
@@ -34,7 +34,7 @@ ssh -i ~/.ssh/LightsailDefaultKey-ap-south-1.pem ubuntu@13.201.210.4
 09:05  main.py --run  (engine starts via cron if not already running)
        READS:  data/settings.json
                data/today_context.json  ← evaluator reads this at each signal
-               agent/memory.json        ← evaluator reads this at each signal
+               agents/memory.json        ← evaluator reads this at each signal
        CALLS:  Claude Haiku (TRADE / SKIP / REVIEW per signal)
                Kite API (order execution)
        WRITES: data/trades.db
@@ -42,10 +42,10 @@ ssh -i ~/.ssh/LightsailDefaultKey-ap-south-1.pem ubuntu@13.201.210.4
           │
           │  data/trades.db
           ▼
-16:00  agent/trainer.py
+16:00  agents/trainer.py
        READS:  data/trades.db
        CALLS:  Claude Haiku (pattern extraction + rule synthesis)
-       WRITES: agent/memory.json   ← read by brief.py next morning at 09:00
+       WRITES: agents/memory.json   ← read by brief.py next morning at 09:00
           │
           ↺  loop — memory.json feeds tomorrow's brief
 ```
@@ -56,9 +56,9 @@ ssh -i ~/.ssh/LightsailDefaultKey-ap-south-1.pem ubuntu@13.201.210.4
 
 | Time | What | Script | Log |
 |------|------|--------|-----|
-| 09:00 | Morning brief → Telegram + saves today_context.json | `agent/brief.py` | `logs/brief.log` |
+| 09:00 | Morning brief → Telegram + saves today_context.json | `agents/brief.py` | `logs/brief.log` |
 | 09:05 | Engine starts (if not already running) | `main.py --run` | `logs/engine.log` |
-| 16:00 | After-market trainer → updates memory.json | `agent/trainer.py` | `logs/trainer.log` |
+| 16:00 | After-market trainer → updates memory.json | `agents/trainer.py` | `logs/trainer.log` |
 
 All three are cron jobs. See `crontab.example` for the exact lines.
 
@@ -136,8 +136,8 @@ These must be recreated manually on a fresh VPS:
 | `data/settings.json` | Live trading settings | Copy from `settings.template.json`, adjust |
 | `data/trades.db` | Trading database | Auto-created on first run |
 | `data/today_context.json` | Daily market context | Auto-created by brief.py each morning |
-| `agent/memory.json` | Trained trading memory | Run `agent/trainer.py` after enough trades |
-| `agent/eval_log.jsonl` | Evaluator audit log | Auto-created by evaluator |
+| `agents/memory.json` | Trained trading memory | Run `agents/trainer.py` after enough trades |
+| `agents/eval_log.jsonl` | Evaluator audit log | Auto-created by evaluator |
 | `venv/` | Python virtual environment | `python3 -m venv venv && venv/bin/pip install -r requirements.txt` |
 | `crontab` | Scheduled jobs | `crontab crontab.example` |
 | `/etc/resolv.conf` | DNS fix | `echo "nameserver 8.8.8.8" \| sudo tee -a /etc/resolv.conf` |
@@ -197,7 +197,7 @@ ps aux | grep streamlit           # dashboard running?
 tail -f logs/engine.log           # live engine output
 tail -f logs/brief.log            # this morning's brief
 cat data/today_context.json       # what the evaluator knows today
-cat agent/memory.json | python3 -m json.tool | head -40   # trained memory
+cat agents/memory.json | python3 -m json.tool | head -40   # trained memory
 ```
 
 ---
