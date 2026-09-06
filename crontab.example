@@ -14,3 +14,10 @@
 
 # 16:00 — After-market trainer: analyses today's trades, updates memory.json
 0 16 * * 1-5 cd /home/ubuntu/Trading_system && /home/ubuntu/Trading_system/venv/bin/python agents/trainer.py >> logs/trainer.log 2>&1
+
+# 16:15 — Daily learning ingestion: reflects completed trades into knowledge store
+15 16 * * 1-5 cd /home/ubuntu/Trading_system && /home/ubuntu/Trading_system/venv/bin/python -m agents.reflect_completed_trades --date $(date +\%F) >> logs/reflection.log 2>&1
+
+# Weekly offline validation — Saturday morning (market closed)
+0 9 * * 6 cd /home/ubuntu/Trading_system && /home/ubuntu/Trading_system/venv/bin/python -m agents.validate_patterns >> logs/validate_patterns.log 2>&1
+15 9 * * 6 cd /home/ubuntu/Trading_system && /home/ubuntu/Trading_system/venv/bin/python -m agents.validate_hypotheses >> logs/validate_hypotheses.log 2>&1
