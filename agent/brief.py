@@ -18,9 +18,10 @@ from pathlib import Path
 logging.basicConfig(level=logging.INFO, format="%(asctime)s  %(levelname)-8s  %(message)s")
 logger = logging.getLogger(__name__)
 
-_ROOT        = Path(__file__).parent.parent
-_MEMORY_PATH = Path(__file__).parent / "memory.json"
-_MODEL       = "claude-haiku-4-5-20251001"
+_ROOT                = Path(__file__).parent.parent
+_MEMORY_PATH         = Path(__file__).parent / "memory.json"
+_TODAY_CONTEXT_PATH  = _ROOT / "data" / "today_context.json"
+_MODEL               = "claude-haiku-4-5-20251001"
 
 
 def _load_memory() -> dict:
@@ -110,6 +111,28 @@ def _apply_regime_settings(memory: dict) -> str:
     return ""
 
 
+def _save_today_context(memory: dict, brief_text: str) -> None:
+    """Save structured today_context.json so the signal evaluator can read it at trade time."""
+    sys.path.insert(0, str(_ROOT))
+    import config
+    s = config.load_settings()
+    ctx = {
+        "date":                date.today().isoformat(),
+        "market_regime":       memory.get("market_regime", "normal"),
+        "bias":                memory.get("bias", "neutral"),
+        "vix_view":            memory.get("vix_view", ""),
+        "key_levels":          memory.get("key_levels", []),
+        "caution_flags":       memory.get("caution_flags", []),
+        "time_of_day_rules":   memory.get("time_of_day_rules", {}),
+        "zone_classes_active": s.get("SCAN_ZONE_CLASSES", ["demand", "supply"]),
+        "scan_window":         s.get("SCAN_WINDOW", {"start": "09:15", "end": "15:00"}),
+        "brief_text":          brief_text,
+    }
+    _TODAY_CONTEXT_PATH.parent.mkdir(exist_ok=True)
+    _TODAY_CONTEXT_PATH.write_text(json.dumps(ctx, indent=2), encoding="utf-8")
+    logger.info("Today context saved → %s", _TODAY_CONTEXT_PATH)
+
+
 def run() -> None:
     logger.info("=== Morning Brief starting ===")
 
@@ -150,6 +173,12 @@ def run() -> None:
         brief_text += f"\n\n{regime_note}"
 
     logger.info("Brief:\n%s", brief_text)
+
+    # Save today_context.json — read by signal evaluator at trade time
+    try:
+        _save_today_context(memory, brief_text)
+    except Exception as e:
+        logger.warning("today_context.json save failed (non-critical): %s", e)
 
     sys.path.insert(0, str(_ROOT))
     try:

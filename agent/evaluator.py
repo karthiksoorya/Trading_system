@@ -14,20 +14,34 @@ The only exception is "no training yet", which correctly passes through.
 import json
 import logging
 import os
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-_MEMORY_PATH = Path(__file__).parent / "memory.json"
-_EVAL_LOG    = Path(__file__).parent / "eval_log.jsonl"
-_MODEL       = "claude-haiku-4-5-20251001"
-_MEMORY_VER  = 1
+_MEMORY_PATH        = Path(__file__).parent / "memory.json"
+_TODAY_CONTEXT_PATH = Path(__file__).parent.parent / "data" / "today_context.json"
+_EVAL_LOG           = Path(__file__).parent / "eval_log.jsonl"
+_MODEL              = "claude-haiku-4-5-20251001"
+_MEMORY_VER         = 1
 
 
 def _load_memory() -> dict:
     try:
         return json.loads(_MEMORY_PATH.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+
+def _load_today_context() -> dict:
+    """Load today_context.json written by brief.py at 09:00. Returns {} if missing or stale."""
+    try:
+        if not _TODAY_CONTEXT_PATH.exists():
+            return {}
+        ctx = json.loads(_TODAY_CONTEXT_PATH.read_text(encoding="utf-8"))
+        if ctx.get("date") != date.today().isoformat():
+            return {}  # stale — not from today
+        return ctx
     except Exception:
         return {}
 
@@ -101,12 +115,35 @@ def evaluate(signal_data: dict, zone_data: dict, vix: float | None = None) -> di
 
 
 def _build_prompt(signal: dict, zone: dict, vix: float | None, memory: dict) -> str:
-    cautions     = memory.get("caution_flags", [])
     mistakes     = memory.get("mistake_log", [])[-3:]
     win_patterns = memory.get("win_patterns", [])[-3:]
     dep_min      = memory.get("departure_thresholds", {}).get("min", 1.0)
     dep_pref     = memory.get("departure_thresholds", {}).get("preferred", 1.5)
-    tod_avoid    = memory.get("time_of_day_rules", {}).get("avoid_after", "13:00")
+
+    # Today's context (fresh from brief.py — overrides static memory where available)
+    today = _load_today_context()
+    regime   = today.get("market_regime") or memory.get("market_regime", "normal")
+    cautions = today.get("caution_flags") or memory.get("caution_flags", [])
+    tod      = today.get("time_of_day_rules") or memory.get("time_of_day_rules", {})
+    tod_avoid = tod.get("avoid_after", "13:00")
+
+    today_section = ""
+    if today:
+        key_levels = today.get("key_levels", [])
+        bias       = today.get("bias", "")
+        vix_view   = today.get("vix_view", "")
+        active_cls = today.get("zone_classes_active", [])
+        brief_snip = today.get("brief_text", "")[:200]
+        today_section = f"""
+TODAY'S CONTEXT (from 09:00 morning brief):
+  Regime: {regime} | Bias: {bias}
+  VIX view: {vix_view if vix_view else 'not specified'}
+  Active zone classes: {', '.join(active_cls) if active_cls else 'demand+supply'}
+  Key levels: {', '.join(str(l) for l in key_levels) if key_levels else 'none'}
+  Today cautions:
+{chr(10).join(f'  - {c}' for c in cautions) if cautions else '  - none'}
+  Brief: {brief_snip}
+"""
 
     return f"""You are evaluating a NIFTY options signal against learned trading rules.
 
@@ -115,12 +152,8 @@ SIGNAL:
   Entry: {signal.get('entry',0):.2f} | SL: {signal.get('stop_loss',0):.2f} | Target: {signal.get('intraday_target',0):.2f}
   Score: {signal.get('score',0)} | Confluence: {signal.get('confluence','')}
   ATR departure: {zone.get('departure_strength',0):.2f}x | Base compression: {zone.get('base_compression',0):.2f}x
-  VIX: {vix if vix else 'unknown'}
-
-REGIME: {memory.get('market_regime','normal')}
-
-CAUTION FLAGS:
-{chr(10).join(f'- {c}' for c in cautions) if cautions else '- none'}
+  VIX: {vix if vix else 'unknown'}{today_section}
+REGIME (historical): {memory.get('market_regime','normal')}
 
 RECENT MISTAKES TO AVOID:
 {chr(10).join(f'- {m}' for m in mistakes) if mistakes else '- none'}
