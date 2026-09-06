@@ -141,7 +141,7 @@ class TestDepartureStrength:
         # Context: ranging boring candles (TR ~ 10 each)
         context = [_c(100, 105, 95, 100)] * n_context
         leg_in  = _bear_exciting()                    # open=100,h=101,l=85,c=86; body=14
-        base    = [_c(87, 92, 83, 88)]               # boring; body=1, range=9, ratio=0.11
+        base    = [_c(87, 92, 83, 88), _c(87, 92, 83, 88)]  # 2 boring candles
         leg_out = _c(88, 105, 87, 104)               # bullish exciting; body=16, range=18
         return context + [leg_in] + base + [leg_out]
 
@@ -162,7 +162,7 @@ class TestDepartureStrength:
         """A bigger leg_out body → higher departure_strength."""
         context = [_c(100, 105, 95, 100)] * 15
         leg_in  = _bear_exciting()
-        base    = [_c(87, 92, 83, 88)]
+        base    = [_c(87, 92, 83, 88), _c(87, 92, 83, 88)]
 
         # Small leg_out: body = 5
         leg_out_small = _c(88, 100, 87, 93)   # body=5, range=13, ratio≈0.38 — may not be exciting
@@ -216,13 +216,13 @@ class TestBaseCompression:
         return context + [leg_in] + base_candles + [leg_out]
 
     def test_base_compression_positive_with_context(self):
-        base = [_c(87, 92, 83, 88)]   # boring, range=9
+        base = [_c(87, 92, 83, 88), _c(87, 92, 83, 88)]   # 2 boring candles
         zones = detect_zones(self._make_dbr(15, base), "5minute")
         assert len(zones) == 1
         assert zones[0].base_compression > 0.0
 
     def test_base_compression_zero_without_context(self):
-        base = [_c(87, 92, 83, 88)]
+        base = [_c(87, 92, 83, 88), _c(87, 92, 83, 88)]
         zones = detect_zones(self._make_dbr(0, base), "5minute")
         assert len(zones) == 1
         assert zones[0].base_compression == 0.0
@@ -232,9 +232,9 @@ class TestBaseCompression:
         context = [_c(100, 105, 95, 100)] * 15
 
         # Tight base: range = 2 pts
-        tight_base  = [_c(88, 89, 87, 88)]   # body=0, range=2, ratio=0 → boring
+        tight_base  = [_c(88, 89, 87, 88), _c(88, 89, 87, 88)]   # 2 boring candles
         # Wide base: range = 18 pts
-        wide_base   = [_c(88, 97, 79, 88)]   # body=0, range=18, ratio=0 → boring
+        wide_base   = [_c(88, 97, 79, 88), _c(88, 97, 79, 88)]   # 2 boring candles
 
         leg_in  = _bear_exciting()
         leg_out = _c(88, 105, 87, 104)
@@ -255,3 +255,24 @@ class TestBaseCompression:
             leg_in=_bear_exciting(), base_candles=[_boring()], leg_out=_bull_exciting(),
         )
         assert z.base_compression == 0.0
+
+
+class TestMinimumBasePolicy:
+    def _pattern(self, base_count):
+        return ([_c(100, 105, 95, 100)] * 15 + [_bear_exciting()] +
+                [_c(87, 92, 83, 88)] * base_count + [_c(88, 105, 87, 104)])
+
+    def test_default_two_rejects_one_base_candle(self, monkeypatch):
+        import config
+        monkeypatch.setattr(config, "load_settings", lambda: {})
+        assert detect_zones(self._pattern(1), "5minute") == []
+
+    def test_two_base_candles_are_eligible(self, monkeypatch):
+        import config
+        monkeypatch.setattr(config, "load_settings", lambda: {})
+        assert len(detect_zones(self._pattern(2), "5minute")) == 1
+
+    def test_settings_override_allows_one_base_candle(self, monkeypatch):
+        import config
+        monkeypatch.setattr(config, "load_settings", lambda: {"MIN_BASE_CANDLES": 1})
+        assert len(detect_zones(self._pattern(1), "5minute")) == 1

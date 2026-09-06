@@ -98,6 +98,10 @@ def _migrate(con):
         ("options_symbol",      "TEXT"),
         ("mode",                "TEXT DEFAULT 'paper'"),
         ("options_entry_price", "REAL"),
+        ("option_fill_time", "TEXT"),
+        ("underlying_at_option_fill", "REAL"),
+        ("underlying_fill_basis", "TEXT"),
+        ("signal_to_fill_seconds", "REAL"),
         ("options_exit_price",  "REAL"),
         ("options_exit_order_id", "TEXT"),
         ("options_lot_size",    "INTEGER"),
@@ -278,11 +282,19 @@ def update_signal_sl(signal_id: int, new_sl: float) -> None:
 
 def update_signal_entry_price(signal_id: int, options_entry_price: float) -> None:
     """Store actual options premium paid after BUY order fills."""
-    with _conn() as con:
-        con.execute(
-            "UPDATE signals SET options_entry_price=? WHERE id=?",
-            (options_entry_price, signal_id),
-        )
+    try:
+        fill_time = datetime.now().strftime("%H:%M:%S")
+        with _conn() as con:
+            con.execute(
+                "UPDATE signals SET options_entry_price=?, option_fill_time=?, "
+                "signal_to_fill_seconds = CASE WHEN time_signal IS NOT NULL THEN "
+                "(julianday(date || ' ' || ?) - julianday(date || ' ' || time_signal)) * 86400 ELSE NULL END "
+                "WHERE id=?",
+                (options_entry_price, fill_time, fill_time, signal_id),
+            )
+    except Exception as exc:
+        # Observational logging must never interrupt an already-confirmed BUY.
+        logger.warning("Could not record option fill context for signal %s: %s", signal_id, exc)
 
 
 def update_signal_sim_outcome(signal_id: int, sim_outcome: str, sim_pnl_points: float) -> None:
