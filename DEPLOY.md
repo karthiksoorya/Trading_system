@@ -18,6 +18,40 @@ ssh -i ~/.ssh/LightsailDefaultKey-ap-south-1.pem ubuntu@13.201.210.4
 
 ---
 
+## Daily Pipeline — How Intelligence Flows
+
+```
+09:00  agent/brief.py
+       READS:  agent/memory.json
+       CALLS:  Claude Haiku (brief generation)
+       WRITES: data/today_context.json   ← today's regime, cautions, key levels
+               data/settings.json       ← regime auto-config (zone classes, scan window)
+       SENDS:  Telegram (morning brief message)
+          │
+          │  data/today_context.json
+          │  data/settings.json
+          ▼
+09:05  main.py --run  (engine starts via cron if not already running)
+       READS:  data/settings.json
+               data/today_context.json  ← evaluator reads this at each signal
+               agent/memory.json        ← evaluator reads this at each signal
+       CALLS:  Claude Haiku (TRADE / SKIP / REVIEW per signal)
+               Kite API (order execution)
+       WRITES: data/trades.db
+       SENDS:  Telegram (signal alerts, fills, EOD summary)
+          │
+          │  data/trades.db
+          ▼
+16:00  agent/trainer.py
+       READS:  data/trades.db
+       CALLS:  Claude Haiku (pattern extraction + rule synthesis)
+       WRITES: agent/memory.json   ← read by brief.py next morning at 09:00
+          │
+          ↺  loop — memory.json feeds tomorrow's brief
+```
+
+---
+
 ## What runs automatically (no daily action needed)
 
 | Time | What | Script | Log |
