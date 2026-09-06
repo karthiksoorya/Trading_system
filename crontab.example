@@ -1,0 +1,16 @@
+# Trading System — VPS Crontab
+# Install: crontab -e  (then paste these lines)
+# View current: crontab -l
+#
+# All times are IST (VPS must be set to Asia/Kolkata)
+# Verify: date
+# Set if wrong: sudo timedatectl set-timezone Asia/Kolkata
+
+# 09:00 — Morning brief: reads memory.json, calls Claude, sends Telegram, saves today_context.json
+0 9 * * 1-5 cd /home/ubuntu/Trading_system && /home/ubuntu/Trading_system/venv/bin/python agent/brief.py >> logs/brief.log 2>&1
+
+# 09:05 — Start engine if not already running (main.py --run is the ONLY correct entry point)
+5 9 * * 1-5 cd /home/ubuntu/Trading_system && pgrep -f "main.py --run" || nohup /home/ubuntu/Trading_system/venv/bin/python main.py --run >> logs/engine.log 2>&1
+
+# 16:00 — After-market trainer: analyses today's trades, updates memory.json
+0 16 * * 1-5 cd /home/ubuntu/Trading_system && /home/ubuntu/Trading_system/venv/bin/python agent/trainer.py >> logs/trainer.log 2>&1
