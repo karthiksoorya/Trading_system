@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 _ROOT        = Path(__file__).parent.parent
 _MEMORY_PATH = Path(__file__).parent / "memory.json"
 _AGENT_DIR   = Path(__file__).parent
-_MODEL       = "claude-sonnet-4-6"
+_MODEL       = "claude-sonnet-5"
 
 
 def _load_memory() -> dict:

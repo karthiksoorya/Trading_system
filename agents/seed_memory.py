@@ -29,7 +29,7 @@ _MEMORY_PATH = Path(__file__).parent / "memory.json"
 _AGENT_DIR   = Path(__file__).parent
 _DB_PATH     = _ROOT / "data" / "trades.db"
 _KNOWLEDGE   = _ROOT / "AGENT_KNOWLEDGE.md"
-_MODEL       = "claude-sonnet-4-6"
+_MODEL       = "claude-sonnet-5"
 
 
 # ── Classify outcome ──────────────────────────────────────────────────────────

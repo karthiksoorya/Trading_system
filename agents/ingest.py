@@ -33,7 +33,7 @@ logger = logging.getLogger(__name__)
 
 _ROOT       = Path(__file__).parent.parent
 _KB_DIR     = Path(__file__).parent / "knowledge"
-_MODEL      = "claude-sonnet-4-6"
+_MODEL      = "claude-sonnet-5"
 _MAX_CHARS  = 12_000   # max chars sent per source (cost control)
 # When content exceeds limit, we use chunked extraction to avoid losing provenance
 _CHUNK_SIZE = 10_000
