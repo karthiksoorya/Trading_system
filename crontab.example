@@ -21,3 +21,6 @@
 # Weekly offline validation — Saturday morning (market closed)
 0 9 * * 6 cd /home/ubuntu/Trading_system && /home/ubuntu/Trading_system/venv/bin/python -m agents.validate_patterns >> logs/validate_patterns.log 2>&1
 15 9 * * 6 cd /home/ubuntu/Trading_system && /home/ubuntu/Trading_system/venv/bin/python -m agents.validate_hypotheses >> logs/validate_hypotheses.log 2>&1
+
+# 03:00 daily — restart dashboard to clear any accumulated memory
+0 3 * * * pkill -f "streamlit run app.py"; sleep 2; cd /home/ubuntu/Trading_system && nohup venv/bin/streamlit run app.py --server.port 8501 --server.address 0.0.0.0 >> logs/streamlit.log 2>&1 &
