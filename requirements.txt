@@ -6,3 +6,4 @@ python-dotenv
 kiteconnect
 anthropic
 pdfplumber
+pyarrow

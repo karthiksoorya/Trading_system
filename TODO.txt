@@ -1,5 +1,5 @@
 Nifty Trading System — TODO
-Last updated: August 21, 2026
+Last updated: September 9, 2026
 ============================================================
 
 ✅ DONE
@@ -72,9 +72,55 @@ Last updated: August 21, 2026
 
 [ ] Grow the per-trade edge above the cost floor
       → Even the strict config: +3.5 idx pts/trade, still -Rs308/trade after
-         Zerodha costs (STT ~Rs312 on notional). Options lose Rs950-1400/trade.
+         Zerodha costs (STT ~Rs312 on notional).
+      → Options loss was quoted Rs950-1400/trade but the option model was
+         Rs1,900/leg OPTIMISTIC (fixed Sep 9). RE-RUN done Sep 9:
+         - strict config: only 4 trades / 3yr (no-trade failure), all losers
+         - loose sample (score>=7 conf>=2, n=76): futures -Rs575/trade,
+           opt_itm1 -Rs1,276/trade win 3.9%, even the 11 target-hits avg -Rs452
+         => long option buying not viable at any strike/config with honest
+            pricing. At best a futures edge, and that's -Rs575/trade on costs
+            in the loose config. Strict config fires too rarely to validate.
       → Options: wider targets, or only trade when the move is expected to be
          big (news, opening range break), or accept it's a futures-only edge.
+
+[ ] BACKTEST DATA REALISM — option P&L is currently synthetic (see AGENT_KNOWLEDGE 11.1)
+      → backtest/option_model.py prices options with Black-Scholes + a VIX->IV
+         model calibrated on ONLY 14 real trades. ~Rs150/trade optimistic,
+         +/-Rs300-400 per-trade error. The rupee bottom line is an estimate.
+         Index/futures-points numbers are fine — distrust the option P&L only.
+      → Step 1 [BUILT Sep 9] backtest/data/nse_bhavcopy.py (downloader, both
+         formats; liquid_marks() shared universe) + validate_option_model.py
+         (model vs real CLOSE) + calibrate.py rewritten two-stage:
+           Stage A = static surface vs bhavcopy marks, with a 70/30 time split
+                     (fit early days, score held-out later days -> Step 3 done)
+           Stage B = crush_coef + half_spread_pts vs the 14 live trades only
+         RUN THE FULL PULL:  py -3.14 -m backtest.data.nse_bhavcopy --years 3
+         then                py -3.14 -m backtest.validate_option_model
+         then                py -3.14 -m backtest.calibrate
+         then paste the fitted ModelParams block into backtest/option_model.py
+         DONE Sep 9 on full 3yr (738 days, 1.19M rows, 56,696 marks):
+         OLD defaults were +Rs1,900/leg OPTIMISTIC across all 12 quarters ->
+         real options loss was ~Rs2,800-3,300/trade not Rs950-1,400. option_model
+         ModelParams updated: term_mult 1.30->1.00, skew 0.90->2.20, crush 0.70->
+         1.00, half_spread 1.5->2.5. Held-out bias now +Rs48-156/leg (generalises).
+         Re-run calibrate after each fresh bhavcopy pull.
+      → Step 2 (paid / vendor account, NOT just a login): minute-level option
+         data, 2-3 yrs Nifty weeklies with real bid/ask. Options: GDFL or
+         TrueData (~Rs1-2k/mo + API creds); Kite historical add-on (Rs2000/mo +
+         historical instrument master for expired tokens); or Upstox historical
+         API (has expired-option candles, cheapest, pairs with Upstox adapter).
+         [USER: planning Upstox]
+      → Step 3 [DONE in Step 1] held-out time split is built into calibrate.py
+         Stage A. Stage B still fits+evaluates on the same 14 trades (too few to
+         split) — keep that caveat in mind.
+      → Step 4: random-entry benchmark — same timestamps, random direction —
+         to prove the zones add value.
+      → Step 5: re-run the edge test on real premiums + real costs, then decide
+         if the supply/demand edge is real.
+      → Also: slippage model is a flat 1.5pt half-spread (no widening at
+         open/close/expiry/fast moves); no regime segmentation of results;
+         no event calendar.
 
 
 ⏳ PENDING — HIGH PRIORITY (build after 1 week of live data)

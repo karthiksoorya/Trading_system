@@ -14,8 +14,9 @@ The model has three parts:
   3. Execution frictions (half-spread in premium points) applied by costs.py,
      not here — this module returns the mid premium only.
 
-Free parameters (term_mult, skew, crush_coef) are fitted by calibrate.py
-against the real option fills in data/trades_*.db.
+Free parameters are fitted by calibrate.py in two stages: the pricing surface
+against NSE bhavcopy daily closes (tens of thousands of real contracts), then
+crush_coef + half_spread_pts against the real fills in data/trades_*.db.
 """
 
 from __future__ import annotations
@@ -39,20 +40,33 @@ YEAR_DAYS = 365.0
 @dataclass(frozen=True)
 class ModelParams:
     """
-    Defaults below are the calibrate.py fit against 14 disciplined real trades
-    (Aug 2026). Fit quality: entry premiums within ~10 pts median, but per-trade
-    P&L error is ~₹300-400 and the model runs ~₹150/trade OPTIMISTIC vs reality.
-    Treat modelled option P&L as indicative (+/- ₹400), not precise. The futures
+    Two-stage calibrate.py fit (Sep 2026):
+
+      • term_mult / iv_add / skew / theta_accel / iv_floor — Stage A, fitted to
+        56,696 real liquid NIFTY weekly closes from the NSE bhavcopy, with a
+        70/30 time split. Held-out median |err| 10.8 pts, bias +₹156/leg — i.e.
+        roughly unbiased, ~±₹700/leg random per contract (averages out over a
+        run). The OLD defaults (term_mult 1.30, skew 0.90) were +₹1,830/leg
+        OPTIMISTIC — every long-option backtest before this read that much rosy.
+
+      • crush_coef / half_spread_pts — Stage B, fitted to 16 disciplined live
+        trades with the surface fixed. Residual ~₹180/trade optimistic (the
+        model assumes clean fills; real trades include stalls it can't mimic).
+
+    Treat modelled option P&L as indicative (~±₹700/leg), not precise. Re-run
+    `python -m backtest.calibrate` after each fresh bhavcopy pull. The futures
     numbers in the backtest carry no such uncertainty.
     """
-    term_mult: float = 1.30      # weekly IV vs 30-day VIX
+    term_mult: float = 1.00      # weekly IV vs 30-day VIX
     iv_add: float = 0.0          # additive annualised-vol term (can be negative)
-    skew: float = 0.90           # extra IV per unit |log-moneyness| (smile)
-    crush_coef: float = 0.70     # IV drop as a fraction of the buyer-favourable move
+    skew: float = 2.20           # extra IV per unit |log-moneyness| (smile) — high:
+                                 # a single term_mult can't fit 2-DTE and 8-DTE weeklies
+                                 # at once, so the fit bends the smile instead
+    crush_coef: float = 1.00     # IV drop as a fraction of the buyer-favourable move
     crush_cap: float = 0.45      # max fractional IV reduction from crush
     theta_accel: float = 1.10    # multiplies calendar theta to mimic trading-clock decay
     iv_floor: float = 0.05       # sigma never falls below this (annualised)
-    half_spread_pts: float = 1.5  # realistic bid/ask half-spread for liquid NIFTY weeklies
+    half_spread_pts: float = 2.5  # realistic bid/ask half-spread for liquid NIFTY weeklies
 
 
 DEFAULT_PARAMS = ModelParams()
