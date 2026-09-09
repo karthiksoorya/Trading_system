@@ -181,7 +181,7 @@ def start_engine():
     log_path.parent.mkdir(exist_ok=True)
     log_file = open(log_path, "a")
     proc = subprocess.Popen(
-        [sys.executable, str(config.BASE_DIR / "scheduler.py"), "--run"],
+        [sys.executable, str(config.BASE_DIR / "main.py"), "--run"],
         cwd=str(config.BASE_DIR),
         stdout=log_file,
         stderr=log_file,
@@ -354,9 +354,94 @@ def _engine_panel():
 
 # ── Tabs ──────────────────────────────────────────────────────────────────
 _pending_label = f"🔔 Approvals ({pending_count()})" if pending_count() else "🔔 Approvals"
-tab_approvals, tab_engine, tab_signals, tab_performance, tab_learning, tab_tutorial, tab_zones, tab_agent = st.tabs([
-    _pending_label, "🔧 Engine", "📊 Signals", "📈 Performance", "🤖 Learning", "📖 Tutorial", "🔍 Zones", "🧠 Agent"
+tab_health, tab_approvals, tab_engine, tab_signals, tab_performance, tab_learning, tab_tutorial, tab_zones, tab_agent = st.tabs([
+    "🩺 Health", _pending_label, "🔧 Engine", "📊 Signals", "📈 Performance", "🤖 Learning", "📖 Tutorial", "🔍 Zones", "🧠 Agent"
 ])
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# TAB 0 — HEALTH (read-only status at a glance)
+# ══════════════════════════════════════════════════════════════════════════
+with tab_health:
+    st.header("System Health")
+    st.caption("Read-only status snapshot. Refresh the page for the latest state.")
+
+    _hcol1, _hcol2, _hcol3 = st.columns(3)
+
+    # ── Engine process ───────────────────────────────────────────────────
+    with _hcol1:
+        if is_engine_running():
+            st.success("🟢 Engine running")
+        else:
+            st.error("🔴 Engine not running")
+
+    # ── Token status ─────────────────────────────────────────────────────
+    with _hcol2:
+        _h_token_ok = False
+        if config.TOKEN_FILE.exists():
+            try:
+                import json as _hjson
+                _h_td = _hjson.loads(config.TOKEN_FILE.read_text())
+                _h_token_ok = _h_td.get("date") == date.today().isoformat()
+            except Exception:
+                pass
+        if _h_token_ok:
+            st.success("🟢 Token valid today")
+        else:
+            st.error("🔴 No valid token today")
+
+    # ── RAM ───────────────────────────────────────────────────────────────
+    with _hcol3:
+        _h_ram_line = None
+        try:
+            with open("/proc/meminfo") as _f:
+                _mem = {}
+                for _line in _f:
+                    _parts = _line.split(":")
+                    if len(_parts) == 2:
+                        _mem[_parts[0].strip()] = int(_parts[1].strip().split()[0])
+                _avail_mb = _mem.get("MemAvailable", 0) // 1024
+                _total_mb = _mem.get("MemTotal", 0) // 1024
+                _h_ram_line = f"{_avail_mb} Mi available / {_total_mb} Mi total"
+                if _avail_mb < 100:
+                    st.error(f"🔴 Low RAM — {_h_ram_line}")
+                else:
+                    st.success(f"🟢 RAM ok — {_h_ram_line}")
+        except Exception:
+            st.info("RAM check unavailable (not Linux)")
+
+    st.divider()
+
+    # ── Last log activity ────────────────────────────────────────────────
+    st.subheader("Last engine activity")
+    _h_log_path = config.BASE_DIR / "logs" / "engine.log"
+    if _h_log_path.exists():
+        try:
+            with open(_h_log_path, "r", errors="ignore") as _f:
+                _h_lines = _f.readlines()
+            _h_tail = _h_lines[-200:] if len(_h_lines) > 200 else _h_lines
+
+            # Traceback check — most important signal, show first
+            _h_traceback_lines = [l for l in _h_tail if "Traceback" in l or "Error" in l or "Exception" in l]
+            if _h_traceback_lines:
+                st.error(f"⚠️ {len(_h_traceback_lines)} error/traceback line(s) found in the last {len(_h_tail)} log lines:")
+                st.code("".join(_h_traceback_lines[-15:]), language="text")
+            else:
+                st.success("No errors or tracebacks in recent log activity.")
+
+            # Last few non-empty lines, most recent last
+            _h_recent = [l.rstrip() for l in _h_tail if l.strip()][-10:]
+            st.text("Last 10 log lines:")
+            st.code("\n".join(_h_recent) if _h_recent else "(empty)", language="text")
+        except Exception as _e:
+            st.warning(f"Could not read engine.log: {_e}")
+    else:
+        st.info("No engine.log found yet.")
+
+    st.divider()
+
+    # ── Quick links ───────────────────────────────────────────────────────
+    st.caption("For deeper investigation, SSH in and run: `tail -f logs/engine.log`")
 
 
 # ══════════════════════════════════════════════════════════════════════════
