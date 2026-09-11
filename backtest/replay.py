@@ -200,7 +200,7 @@ def run_backtest(params: DSParams | None = None,
                  progress: bool = True) -> list[Trade]:
     md = md or MarketData()
     params = params or DSParams()
-    strat = DemandSupplyStrategy(params)
+    strat = DemandSupplyStrategy(params, curve_lookup=md.daily_range)
 
     days = md.trading_days()
     if start:

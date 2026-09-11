@@ -23,6 +23,7 @@ from dataclasses import dataclass, field
 from datetime import date, datetime, time
 
 import config
+from engine import curve
 from engine.confluence import check_confluence
 from engine.signals import Signal, generate_signal
 from engine.zones import Zone, detect_zones, update_zone_state
@@ -57,6 +58,9 @@ class DSParams:
     trend_filter: bool = True             # 60min trend must align with zone class
     ce_after_11: bool = True              # skip demand/CE before 11:00
     vix_direction_filter: bool = True     # skip demand/CE when VIX rising > 5% off day low
+    curve_filter: bool = False            # skip zones stretched on the HTF range (see engine/curve.py). Off by default — unproven.
+    curve_lookback_days: int = 20
+    curve_extreme_pct: float = 0.25       # top/bottom quartile of the range = "stretched"
     vix_max: float = 20.0
     iv_rank_max: float = 60.0
     dedupe_same_zone: bool = True
@@ -64,7 +68,7 @@ class DSParams:
     disabled_zone_types: tuple[str, ...] = ()
 
     def label(self) -> str:
-        on = [k for k in ("trend_filter", "ce_after_11", "vix_direction_filter")
+        on = [k for k in ("trend_filter", "ce_after_11", "vix_direction_filter", "curve_filter")
               if getattr(self, k)]
         risk = ""
         if self.min_risk_points or self.max_risk_points:
@@ -81,13 +85,17 @@ class DayState:
 
 
 class DemandSupplyStrategy:
-    def __init__(self, params: DSParams | None = None):
+    def __init__(self, params: DSParams | None = None, curve_lookup=None):
         self.p = params or DSParams()
         # generate_signal() reads these module globals directly
         config.SL_BUFFER_POINTS = self.p.sl_buffer_points
         config.MIN_BOOSTER_SCORE = self.p.min_booster_score
         self._day: date | None = None
         self.state = DayState()
+        # optional callable(day, lookback_days) -> (low, high) | None, for curve_filter.
+        # Injected by the caller (replay.py passes MarketData.daily_range) so this
+        # module stays free of any I/O.
+        self.curve_lookup = curve_lookup
 
     # ── per-day reset ────────────────────────────────────────────────────
     def new_day(self, d: date):
@@ -190,6 +198,15 @@ class DemandSupplyStrategy:
                     if zone.zone_class == "demand" and trend == "down":
                         continue
                     if zone.zone_class == "supply" and trend == "up":
+                        continue
+
+            # Filter 4 — curve: is this zone stretched on the higher-timeframe range?
+            if p.curve_filter and self.curve_lookup is not None and self._day is not None:
+                rng = self.curve_lookup(self._day, p.curve_lookback_days)
+                if rng is not None:
+                    lo, hi = rng
+                    if curve.zone_is_stretched(zone.zone_class, zone.proximal, lo, hi,
+                                               p.curve_extreme_pct):
                         continue
 
             confluence = check_confluence(zone, higher)

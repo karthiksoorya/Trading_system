@@ -59,6 +59,12 @@ def main():
     ap.add_argument("--no-trend-filter", action="store_true")
     ap.add_argument("--no-ce-time-filter", action="store_true")
     ap.add_argument("--no-vix-filter", action="store_true")
+    ap.add_argument("--curve-filter", action="store_true",
+                    help="skip zones stretched in the top/bottom of the HTF daily range (engine/curve.py)")
+    ap.add_argument("--curve-lookback", type=int, default=_d.curve_lookback_days,
+                    help="curve filter: trading days in the reference range (default %(default)s)")
+    ap.add_argument("--curve-extreme", type=float, default=_d.curve_extreme_pct,
+                    help="curve filter: top/bottom fraction of the range treated as stretched (default %(default)s)")
     ap.add_argument("--time-exit-hour", type=int, default=13)
     ap.add_argument("--entry-mode", choices=["limit", "market"], default="limit",
                     help="limit = order at zone proximal, no fill if price never returns; "
@@ -83,6 +89,9 @@ def main():
         trend_filter=not args.no_trend_filter,
         ce_after_11=not args.no_ce_time_filter,
         vix_direction_filter=not args.no_vix_filter,
+        curve_filter=args.curve_filter,
+        curve_lookback_days=args.curve_lookback,
+        curve_extreme_pct=args.curve_extreme,
         time_exit_hour=args.time_exit_hour,
     )
     start = date.fromisoformat(args.start) if args.start else None

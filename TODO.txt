@@ -118,6 +118,19 @@ Last updated: September 9, 2026
          to prove the zones add value.
       → Step 5: re-run the edge test on real premiums + real costs, then decide
          if the supply/demand edge is real.
+
+[x] Settings sweep for the Aug29-Sep11 no-trade stall (Sep 11) — CLOSED, no knob helps
+      → Refreshed Kite token + candle cache (fetch.py OVERWRITES not merges — always
+         use --years 3, never a shorter window, or you truncate the option-model
+         calibration history. Happened once Sep 11, caught and fixed same session.)
+      → confluence 2 (live) on the stall window: 0 trades, matches live exactly (sanity ok)
+      → approach 30->60, or dropping trend filter, alone: still 0 trades — confluence is
+         the actual gate, not approach/trend
+      → confluence 1, full 3yr, n=163: futures -Rs642/trade win 36% PF 0.57, opt_itm1
+         -Rs1,266/trade win 3.7% PF 0.02, index net -375pts. WORSE than confluence 2,
+         not better -> loosening confluence adds losing trades, doesn't unlock edge.
+      → Conclusion: confluence=2 is correctly filtering. The stall was a genuinely thin
+         fortnight, not a config bug. No settings change is warranted from this test.
       → Also: slippage model is a flat 1.5pt half-spread (no widening at
          open/close/expiry/fast moves); no regime segmentation of results;
          no event calendar.
@@ -131,14 +144,22 @@ Last updated: September 9, 2026
       → Example: entry 24201, target 24266 → exit at 24250 after 11:30
       → File: engine/signals.py + scheduler.py monitor_open_trades
 
-[ ] Curve analysis — HTF position filter
-      → Biggest gap in strategy. Zone fires but no check if Nifty is
-         at top/bottom of its daily/weekly range.
-      → A demand zone at the TOP of the daily curve is weak.
-      → A supply zone at the BOTTOM of the daily range is weak.
-      → Implement: fetch 60min or daily candles, check zone position
-         relative to recent swing high/low
-      → File: engine/signals.py or new engine/curve.py
+[~] Curve analysis — HTF position filter — BUILT Sep 11 as backtest opt-in, PROMISING NOT PROVEN
+      → engine/curve.py (pure fn, no I/O) + MarketData.daily_range() (20-day
+         lookback, no-lookahead) + DSParams.curve_filter (default OFF) wired
+         into strategy_ds.py + backtest/run.py --curve-filter flag.
+      → Skips demand zones in top 25% of the 20-day range, supply in bottom 25%.
+      → Full 3yr (score8/conf2, matches live): idx pts -36 -> +151, futures
+         -Rs508/trade -> -Rs182/trade, win 37.8% -> 43.2%, PF 0.63 -> 0.84.
+         Options still lose (spread/theta dominates regardless).
+      → SPLIT BY HALF — NOT stable: 2023-25 +143pts/PF1.10 (carries the whole
+         result); 2025-26 (incl. this week's downtrend regime) only +8pts/PF0.66,
+         net LOSS. Do NOT deploy live off this alone.
+      → Next: proper walk-forward (rolling fit/validate, not one static split)
+         before trusting it. Extreme=0.25 beat 0.35 in the one comparison run
+         (+151 vs +108 pts) — not swept further, don't over-tune on this sample.
+      → Files: engine/curve.py, backtest/marketdata.py, backtest/strategy_ds.py,
+         backtest/replay.py, backtest/run.py
 
 [ ] HPA levels — High Probability Areas
       → Previous Day High (PDH), Previous Day Low (PDL)

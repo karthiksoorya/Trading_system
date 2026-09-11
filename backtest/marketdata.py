@@ -34,6 +34,11 @@ class MarketData:
         self._vixd = self._vixd.sort_values("date").reset_index(drop=True)
         self._iv_rank_cache: dict[date, float | None] = {}
 
+        daily = C.load_timeframe("nifty", "day", base_interval).copy()
+        daily["d"] = pd.to_datetime(daily["date"]).dt.date
+        self._daily = daily.sort_values("d").reset_index(drop=True)
+        self._range_cache: dict[tuple, tuple[float, float] | None] = {}
+
     # ── VIX ────────────────────────────────────────────────────────────
     def vix_at(self, ts: datetime) -> float | None:
         s = self._vix5.loc[:ts]
@@ -52,6 +57,19 @@ class MarketData:
         rank = 50.0 if hi == lo else round((cur - lo) / (hi - lo) * 100, 1)
         self._iv_rank_cache[d] = rank
         return rank
+
+    # ── curve (higher-timeframe range) ───────────────────────────────────
+    def daily_range(self, day: date, lookback_days: int = 20) -> tuple[float, float] | None:
+        """High/low over the `lookback_days` trading days strictly BEFORE `day`
+        (today's not-yet-complete range is never included — no lookahead)."""
+        key = (day, lookback_days)
+        if key in self._range_cache:
+            return self._range_cache[key]
+        hist = self._daily[self._daily["d"] < day].tail(lookback_days)
+        result = None if len(hist) < max(5, lookback_days // 2) else \
+            (float(hist["low"].min()), float(hist["high"].max()))
+        self._range_cache[key] = result
+        return result
 
     # ── futures ────────────────────────────────────────────────────────
     def fut_price_at(self, ts: datetime, index_fallback: float) -> float:
