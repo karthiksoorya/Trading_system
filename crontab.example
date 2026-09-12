@@ -18,6 +18,11 @@
 # 16:15 — Daily learning ingestion: reflects completed trades into knowledge store
 15 16 * * 1-5 cd /home/ubuntu/Trading_system && /home/ubuntu/Trading_system/venv/bin/python -m agents.reflect_completed_trades --date $(date +\%F) >> logs/reflection.log 2>&1
 
+# 15:40 — Backup trades.db (+ agent memory) to Telegram. Runs as its own job,
+# NOT from inside the engine — the engine process exits at 15:35, so anything
+# scheduled after that inside scheduler.py's run() loop can never fire.
+40 15 * * 1-5 cd /home/ubuntu/Trading_system && /home/ubuntu/Trading_system/venv/bin/python -m backup >> logs/backup.log 2>&1
+
 # Weekly offline validation — Saturday morning (market closed)
 0 9 * * 6 cd /home/ubuntu/Trading_system && /home/ubuntu/Trading_system/venv/bin/python -m agents.validate_patterns >> logs/validate_patterns.log 2>&1
 15 9 * * 6 cd /home/ubuntu/Trading_system && /home/ubuntu/Trading_system/venv/bin/python -m agents.validate_hypotheses >> logs/validate_hypotheses.log 2>&1

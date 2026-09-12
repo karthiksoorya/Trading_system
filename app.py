@@ -988,7 +988,8 @@ with tab_engine:
                     st.error("❌ Send failed — check logs/backup.log for details.")
             except Exception as e:
                 st.error(f"❌ Error: {e}")
-    st.caption("Auto-backup also runs daily at 15:45 IST after market close.")
+    st.caption("Auto-backup also runs weekdays at 15:40 IST via its own cron job "
+              "(not from inside the engine, so it still fires even if the engine crashed earlier).")
 
 # ══════════════════════════════════════════════════════════════════════════
 # TAB 2 — APPROVALS  (auto-refreshes every 30s without changing active tab)

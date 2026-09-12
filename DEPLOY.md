@@ -62,6 +62,7 @@ ssh -i ~/.ssh/LightsailDefaultKey-ap-south-1.pem ubuntu@13.201.210.4
 | 09:05 | Engine starts (if not already running) | `main.py --run` | `logs/engine.log` |
 | 16:00 | After-market trainer → updates memory.json | `agents/trainer.py` | `logs/trainer.log` |
 | 16:15 | Learning ingestion → reflects completed trades into knowledge store | `agents/reflect_completed_trades` | `logs/reflection.log` |
+| 15:40 | Backup trades.db + agent memory to Telegram — own cron job, NOT scheduled from inside the engine (which exits at 15:35, so it can't fire jobs after that) | `backup.py` | `logs/backup.log` |
 | 03:00 | Restart dashboard — clears accumulated memory from long-lived Streamlit process | pkill + relaunch `streamlit run app.py` | `logs/streamlit.log` |
 
 ### Weekly (Saturday)
