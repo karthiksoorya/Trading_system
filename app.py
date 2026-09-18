@@ -150,6 +150,20 @@ def _engine_pid() -> int | None:
     except Exception:
         return None
 
+def _find_untracked_engine_pid() -> int | None:
+    """Find a running main.py --run process even if the dashboard never launched it
+    (started via cron, SSH nohup, etc.) — the PID file alone can't see those, which
+    let the dashboard launch a second competing engine process on 2026-09-18."""
+    if sys.platform == "win32":
+        return None
+    try:
+        out = subprocess.check_output(
+            ["pgrep", "-f", "main.py --run"], stderr=subprocess.DEVNULL,
+        ).decode(errors="ignore").split()
+        return int(out[0]) if out else None
+    except Exception:
+        return None
+
 def is_engine_running() -> bool:
     # Primary check: flag in settings.json (works even under systemd)
     if config.load_settings().get("engine_state") == "stopped":
@@ -157,22 +171,28 @@ def is_engine_running() -> bool:
         return False
     # Secondary check: is the PID actually alive?
     pid = _engine_pid()
-    if pid is None:
-        return False
-    try:
-        if sys.platform == "win32":
-            out = subprocess.check_output(
-                ["tasklist", "/FI", f"PID eq {pid}", "/NH"],
-                stderr=subprocess.DEVNULL,
-            ).decode(errors="ignore")
-            alive = str(pid) in out
-        else:
-            os.kill(pid, 0)
-            alive = True
-    except Exception:
-        alive = False
+    alive = False
+    if pid is not None:
+        try:
+            if sys.platform == "win32":
+                out = subprocess.check_output(
+                    ["tasklist", "/FI", f"PID eq {pid}", "/NH"],
+                    stderr=subprocess.DEVNULL,
+                ).decode(errors="ignore")
+                alive = str(pid) in out
+            else:
+                os.kill(pid, 0)
+                alive = True
+        except Exception:
+            alive = False
     if not alive:
         config.ENGINE_PID_FILE.unlink(missing_ok=True)
+        # Fallback: a real engine process may be running without a PID file
+        # (started outside the dashboard). Adopt it so we don't double-start.
+        untracked_pid = _find_untracked_engine_pid()
+        if untracked_pid is not None:
+            config.ENGINE_PID_FILE.write_text(str(untracked_pid))
+            alive = True
     return alive
 
 def start_engine():
