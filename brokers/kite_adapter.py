@@ -29,6 +29,24 @@ _INSTRUMENTS_TTL = 1800   # seconds — refresh every 30 min
 
 class KiteAdapter(BrokerBase):
 
+    broker_name = "kite"
+
+    def cancel_execution_order(self, order_id):
+        self._kite.cancel_order(variety='regular', order_id=order_id)
+
+    def get_underlying_observation(self, symbol):
+        from brokers.base import UnderlyingObservation, broker_time
+        raw = self._kite.quote([symbol])[symbol]
+        return UnderlyingObservation(float(raw['last_price']), broker_time(raw.get('timestamp')),
+                                     'confirmation_quote')
+
+    def get_order_execution(self, order_id):
+        from brokers.base import normalize_execution
+        history = self._kite.order_history(order_id)
+        if not history:
+            raise ValueError("No broker order history")
+        return normalize_execution(order_id, history[-1], self._kite.order_trades(order_id))
+
     def __init__(self):
         self._kite = KiteConnect(api_key=config.KITE_API_KEY, timeout=10)
         self._token_loaded = False
@@ -283,7 +301,7 @@ class KiteAdapter(BrokerBase):
             pass
         return config.NIFTY_LOT_SIZE   # fallback to hardcoded value
 
-    def place_options_order(self, symbol: str, action: str, quantity: int) -> str:
+    def place_options_order(self, symbol: str, action: str, quantity: int, *, before_submit=None) -> str:
         """Place MIS limit order at current option LTP ± buffer. Falls back to market if LTP unavailable."""
         tx = (self._kite.TRANSACTION_TYPE_BUY
               if action == "BUY" else self._kite.TRANSACTION_TYPE_SELL)
@@ -312,6 +330,8 @@ class KiteAdapter(BrokerBase):
         if price is not None:
             kwargs["price"] = price
 
+        if before_submit is not None:
+            before_submit()
         order_id = self._kite.place_order(**kwargs)
         logger.info("Placed %s %s order for %s qty=%d price=%s → order_id=%s",
                     action, order_type, symbol, quantity, price, order_id)

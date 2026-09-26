@@ -20,6 +20,12 @@ _COLUMNS = [
     "exit_time", "exit_price", "exit_reason",
     "pnl_points", "result", "rule_based", "notes", "mode",
     "sim_outcome", "sim_pnl_points",   # simulated outcome for expired/rejected — ML training
+    "execution_broker", "execution_state", "kite_order_id", "options_exit_order_id",
+    "options_symbol", "option_fill_time", "option_fill_time_basis", "option_exit_fill_time",
+    "underlying_at_option_fill", "underlying_observed_at", "underlying_fill_basis", "signal_to_fill_seconds",
+    "options_entry_price", "options_exit_price", "options_entry_quantity", "options_exit_quantity",
+    "options_gross_pnl_rs", "options_charges_rs", "options_net_pnl_rs",
+    "options_estimated_charges_rs", "options_estimated_net_pnl_rs", "accounting_status",
 ]
 
 

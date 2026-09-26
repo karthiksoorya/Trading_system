@@ -84,6 +84,7 @@ def init_db():
         con.execute(_CREATE_SIGNALS)
         con.execute(_CREATE_DAILY)
         _migrate(con)
+        _migrate_execution(con)
     logger.info("Database initialised at %s", config.DB_PATH)
 
 
@@ -127,7 +128,7 @@ def _migrate(con):
                     raise
     # Fix any rows closed before status='closed' was introduced
     con.execute(
-        "UPDATE signals SET status='closed' WHERE status='approved' AND exit_price IS NOT NULL"
+        "UPDATE signals SET status='closed' WHERE status='approved' AND exit_price IS NOT NULL AND mode!='live'"
     )
     # BUG 21 fix: backfill any rows with NULL status that ALTER TABLE left behind
     con.execute("UPDATE signals SET status='pending' WHERE status IS NULL")
@@ -201,6 +202,9 @@ def close_trade(
         logger.warning("Signal id=%s not found.", signal_id)
         return
 
+    if entry_row["mode"] == "live":
+        raise ValueError("Live trades close only through broker execution reconciliation")
+
     # BUG 10 fix: guard against double-close (race condition between monitor + Telegram/dashboard)
     if entry_row["status"] == "closed":
         logger.warning("Signal id=%s already closed — skipping duplicate close.", signal_id)
@@ -212,6 +216,9 @@ def close_trade(
     result = "win" if pnl_points > 0 else ("loss" if pnl_points < 0 else "breakeven")
 
     with _conn() as con:
+        con.execute("BEGIN IMMEDIATE")
+        if con.execute("SELECT status FROM signals WHERE id=?", (signal_id,)).fetchone()[0] == "closed":
+            return
         con.execute(
             """
             UPDATE signals
@@ -231,12 +238,13 @@ def close_trade(
             ),
         )
 
-    _upsert_daily_summary(entry_row["date"], pnl_points, result)
+        _upsert_daily_summary(entry_row["date"], pnl_points, result, con)
     logger.info("Trade closed: id=%s result=%s pnl=%.2f pts", signal_id, result, pnl_points)
 
 
-def _upsert_daily_summary(trade_date: str, pnl_points: float, result: str):
-    with _conn() as con:
+def _upsert_daily_summary(trade_date: str, pnl_points: float, result: str, connection=None):
+    from contextlib import nullcontext
+    with (nullcontext(connection) if connection is not None else _conn()) as con:
         con.execute(
             "INSERT OR IGNORE INTO daily_summary (date, max_daily_loss) VALUES (?, ?)",
             (trade_date, config.MAX_DAILY_LOSS),
@@ -283,14 +291,10 @@ def update_signal_sl(signal_id: int, new_sl: float) -> None:
 def update_signal_entry_price(signal_id: int, options_entry_price: float) -> None:
     """Store actual options premium paid after BUY order fills."""
     try:
-        fill_time = datetime.now().strftime("%H:%M:%S")
         with _conn() as con:
             con.execute(
-                "UPDATE signals SET options_entry_price=?, option_fill_time=?, "
-                "signal_to_fill_seconds = CASE WHEN time_signal IS NOT NULL THEN "
-                "(julianday(date || ' ' || ?) - julianday(date || ' ' || time_signal)) * 86400 ELSE NULL END "
-                "WHERE id=?",
-                (options_entry_price, fill_time, fill_time, signal_id),
+                "UPDATE signals SET options_entry_price=? WHERE id=? AND mode!='live'",
+                (options_entry_price, signal_id),
             )
     except Exception as exc:
         # Observational logging must never interrupt an already-confirmed BUY.
@@ -310,7 +314,7 @@ def update_signal_exit_order(signal_id: int, exit_order_id: str, exit_price: flo
     """Store actual options premium received after SELL order fills."""
     with _conn() as con:
         con.execute(
-            "UPDATE signals SET options_exit_order_id=?, options_exit_price=? WHERE id=?",
+            "UPDATE signals SET options_exit_order_id=?, options_exit_price=? WHERE id=? AND mode!='live'",
             (exit_order_id, exit_price, signal_id),
         )
 
@@ -422,7 +426,7 @@ def get_open_trades() -> list[sqlite3.Row]:
     """Trades approved by user that are still active (not yet closed)."""
     with _conn() as con:
         return con.execute(
-            "SELECT * FROM signals WHERE status = 'approved'"
+            "SELECT * FROM signals WHERE status IN ('approved', 'entry_pending', 'exit_pending', 'reconciliation_required')"
         ).fetchall()
 
 
@@ -440,7 +444,7 @@ def approve_signal(signal_id: int):
     """User approved the signal — mark as active trade."""
     with _conn() as con:
         con.execute(
-            "UPDATE signals SET status = 'approved' WHERE id = ?",
+            "UPDATE signals SET status = 'approved' WHERE id = ? AND status='pending' AND mode!='live'",
             (signal_id,),
         )
     logger.info("Signal #%d approved.", signal_id)
@@ -450,7 +454,7 @@ def reject_signal(signal_id: int, note: str = ""):
     """User rejected the signal — skip it. Pass note for auto-rejections."""
     with _conn() as con:
         con.execute(
-            "UPDATE signals SET status = 'rejected', notes = COALESCE(NULLIF(?, ''), notes) WHERE id = ?",
+            "UPDATE signals SET status = 'rejected', notes = COALESCE(NULLIF(?, ''), notes) WHERE id = ? AND status='pending'",
             (note, signal_id),
         )
     logger.info("Signal #%d rejected. %s", signal_id, note)
@@ -467,20 +471,169 @@ def daily_pnl(trade_date: Optional[str] = None) -> float:
 
 
 def daily_options_pnl(trade_date: Optional[str] = None) -> float:
-    """Sum of (exit - entry) × lot_size for all closed options trades today.
-    Returns 0.0 if no live options trades closed yet, or columns are NULL."""
-    trade_date = trade_date or date.today().isoformat()
+    """Confirmed realized gross option rupees; incomplete data is never zero."""
+    result = daily_rupee_accounting(trade_date, mode=config.load_settings().get('MODE', config.MODE))
+    return result['gross'] if result['complete'] else None
+
+
+# Execution ledger. Existing point-based research fields retain their meaning.
+def _migrate_execution(con):
+    columns = {
+        "execution_broker": "TEXT", "execution_state": "TEXT",
+        "option_fill_time_basis": "TEXT", "option_exit_fill_time": "TEXT",
+        "underlying_observed_at": "TEXT", "options_entry_quantity": "INTEGER",
+        "options_exit_quantity": "INTEGER", "options_gross_pnl_rs": "REAL",
+        "options_charges_rs": "REAL", "options_net_pnl_rs": "REAL",
+        "options_estimated_charges_rs": "REAL", "options_estimated_net_pnl_rs": "REAL",
+        "accounting_status": "TEXT",
+    }
+    existing = {r[1] for r in con.execute("PRAGMA table_info(signals)")}
+    for name, kind in columns.items():
+        if name not in existing:
+            con.execute(f"ALTER TABLE signals ADD COLUMN {name} {kind}")
+    con.execute("UPDATE signals SET option_fill_time_basis='legacy_local_clock' "
+                "WHERE option_fill_time IS NOT NULL AND option_fill_time_basis IS NULL")
+    con.executescript("""
+        CREATE TABLE IF NOT EXISTS execution_orders (
+            id INTEGER PRIMARY KEY, signal_id INTEGER NOT NULL REFERENCES signals(id),
+            broker TEXT NOT NULL, broker_order_id TEXT, side TEXT NOT NULL,
+            requested_quantity INTEGER NOT NULL, filled_quantity INTEGER NOT NULL DEFAULT 0,
+            status TEXT NOT NULL, requested_at TEXT NOT NULL, confirmed_at TEXT,
+            exit_reason TEXT, requester TEXT, error TEXT,
+            UNIQUE(broker, broker_order_id)
+        );
+        CREATE UNIQUE INDEX IF NOT EXISTS one_unresolved_order_per_signal
+            ON execution_orders(signal_id) WHERE status NOT IN ('COMPLETE','CANCELLED','REJECTED');
+        CREATE TABLE IF NOT EXISTS execution_fills (
+            id INTEGER PRIMARY KEY, order_id INTEGER NOT NULL REFERENCES execution_orders(id),
+            broker TEXT NOT NULL, execution_id TEXT NOT NULL, quantity INTEGER NOT NULL,
+            premium REAL NOT NULL, broker_timestamp TEXT, timestamp_basis TEXT NOT NULL,
+            underlying_price REAL, underlying_observed_at TEXT, underlying_basis TEXT,
+            UNIQUE(order_id, execution_id)
+        );
+        CREATE TABLE IF NOT EXISTS execution_charges (
+            order_id INTEGER PRIMARY KEY REFERENCES execution_orders(id),
+            amount REAL NOT NULL, source TEXT NOT NULL, reference TEXT NOT NULL,
+            reconciled_at TEXT NOT NULL, basis TEXT NOT NULL CHECK(basis='actual')
+        );
+    """)
+
+
+def execution_orders(signal_id):
     with _conn() as con:
-        rows = con.execute(
-            """SELECT options_entry_price, options_exit_price, options_lot_size
-               FROM signals
-               WHERE date=? AND status='closed'
-               AND options_entry_price IS NOT NULL
-               AND options_exit_price  IS NOT NULL""",
-            (trade_date,),
-        ).fetchall()
-    total = 0.0
-    for r in rows:
-        lot = r["options_lot_size"] or 65
-        total += (r["options_exit_price"] - r["options_entry_price"]) * lot
-    return round(total, 2)
+        return [dict(r) for r in con.execute(
+            "SELECT * FROM execution_orders WHERE signal_id=? ORDER BY id", (signal_id,))]
+
+
+def _accounting(con, signal_id):
+    """FIFO realized proceeds and allocated order charges; no guessed quantity."""
+    from agents.costs import estimate_order_cost
+    orders = {r['id']: dict(r) for r in con.execute(
+        "SELECT * FROM execution_orders WHERE signal_id=? ORDER BY id", (signal_id,))}
+    fills = [dict(r) for r in con.execute(
+        "SELECT f.* FROM execution_fills f JOIN execution_orders o ON o.id=f.order_id "
+        "WHERE o.signal_id=? ORDER BY o.id, f.broker_timestamp, f.id", (signal_id,))]
+    charges = {r['order_id']: r['amount'] for r in con.execute(
+        "SELECT c.* FROM execution_charges c JOIN execution_orders o ON o.id=c.order_id WHERE o.signal_id=?",
+        (signal_id,))}
+    totals = {oid: sum(f['quantity'] for f in fills if f['order_id'] == oid) for oid in orders}
+    estimates = {oid: estimate_order_cost(o['side'],
+                 sum(f['quantity'] * f['premium'] for f in fills if f['order_id'] == oid))
+                 for oid, o in orders.items()}
+    buys, realized = [], []
+    complete = all(totals[oid] == o['filled_quantity'] for oid, o in orders.items())
+    for f in fills:
+        if orders[f['order_id']]['side'] == 'BUY':
+            buys.append([f, f['quantity']])
+            continue
+        remaining = f['quantity']
+        for buy in buys:
+            if not remaining:
+                break
+            entry, available = buy
+            q = min(available, remaining)
+            if not q:
+                continue
+            buy[1] -= q
+            remaining -= q
+            bo, so = entry['order_id'], f['order_id']
+            actual = (charges[bo] * q / totals[bo] + charges[so] * q / totals[so]
+                      if bo in charges and so in charges else None)
+            estimated = ((charges.get(bo, estimates[bo]) * q / totals[bo]) +
+                         (charges.get(so, estimates[so]) * q / totals[so]))
+            gross = (f['premium'] - entry['premium']) * q
+            realized.append(dict(gross=gross, charges=actual, estimated_charges=estimated,
+                                 timestamp=f['broker_timestamp']))
+        if remaining:
+            complete = False
+    return orders, fills, realized, complete
+
+
+def refresh_accounting(con, signal_id):
+    orders, fills, realized, complete = _accounting(con, signal_id)
+    buys = [f for f in fills if orders[f['order_id']]['side'] == 'BUY']
+    sells = [f for f in fills if orders[f['order_id']]['side'] == 'SELL']
+    bq, sq = sum(f['quantity'] for f in buys), sum(f['quantity'] for f in sells)
+    gross = sum(r['gross'] for r in realized) if realized and complete else None
+    charges = sum(r['charges'] for r in realized) if realized and complete and all(r['charges'] is not None for r in realized) else None
+    estimated = sum(r['estimated_charges'] for r in realized) if gross is not None else None
+    state = 'actual' if charges is not None else ('estimated_charges' if gross is not None else 'pending')
+    if not complete:
+        state = 'incomplete'
+    con.execute("""UPDATE signals SET options_entry_quantity=?, options_exit_quantity=?,
+        options_entry_price=?, options_exit_price=?, options_gross_pnl_rs=?, options_charges_rs=?,
+        options_net_pnl_rs=?, options_estimated_charges_rs=?, options_estimated_net_pnl_rs=?,
+        accounting_status=? WHERE id=?""",
+        (bq, sq, sum(f['quantity'] * f['premium'] for f in buys) / bq if bq else None,
+         sum(f['quantity'] * f['premium'] for f in sells) / sq if sq else None,
+         round(gross, 2) if gross is not None else None, round(charges, 2) if charges is not None else None,
+         round(gross - charges, 2) if charges is not None else None,
+         round(estimated, 2) if estimated is not None else None,
+         round(gross - estimated, 2) if estimated is not None else None, state, signal_id))
+    return bq, sq, complete
+
+
+def record_actual_charges(order_id, amount, source, reference):
+    """Reconcile an entire order's confirmed contract-note charges, not a prediction."""
+    import math
+    from brokers.base import IST
+    if not math.isfinite(amount) or amount < 0 or not source or not reference:
+        raise ValueError("Actual charges require a finite amount and source/reference")
+    with _conn() as con:
+        con.execute("BEGIN IMMEDIATE")
+        order = con.execute("SELECT * FROM execution_orders WHERE id=?", (order_id,)).fetchone()
+        if not order or order['status'] not in ('COMPLETE', 'CANCELLED', 'REJECTED'):
+            raise ValueError("Reconcile charges only for a terminal order")
+        con.execute("INSERT INTO execution_charges VALUES (?,?,?,?,?,'actual') "
+                    "ON CONFLICT(order_id) DO UPDATE SET amount=excluded.amount, source=excluded.source, "
+                    "reference=excluded.reference, reconciled_at=excluded.reconciled_at",
+                    (order_id, amount, source, reference, datetime.now(IST).isoformat()))
+        refresh_accounting(con, order['signal_id'])
+
+
+def daily_rupee_accounting(trade_date=None, mode='live'):
+    from brokers.base import IST
+    trade_date = trade_date or datetime.now(IST).date().isoformat()
+    gross = net = 0.0
+    complete, estimated = True, False
+    with _conn() as con:
+        for row in con.execute("SELECT * FROM signals WHERE mode=?", (mode,)).fetchall():
+            orders, fills, realized, valid = _accounting(con, row['id'])
+            # Unverified legacy rows today and unresolved exposure cannot become zero P&L.
+            if not orders and ((row['date'] == trade_date and row['status'] in ('approved','closed'))
+                               or row['status'] in ('approved','entry_pending','exit_pending','reconciliation_required')):
+                complete = False
+            if not valid or any(o['status'] in ('UNKNOWN', 'SUBMITTING') for o in orders.values()):
+                complete = False
+            for r in realized:
+                if r['timestamp'] is None:
+                    complete = False
+                    continue
+                if r['timestamp'][:10] != trade_date:
+                    continue
+                gross += r['gross']
+                fee = r['charges'] if r['charges'] is not None else r['estimated_charges']
+                estimated |= r['charges'] is None
+                net += r['gross'] - fee
+    return dict(gross=round(gross, 2), net=round(net, 2), complete=complete,
+                basis='estimated_charges' if estimated else 'actual')

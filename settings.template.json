@@ -2,10 +2,22 @@
   "MODE": "live",
   "BROKER": "kite",
   "ENTRY_TIMEFRAME": "5minute",
-  "SCAN_TIMEFRAMES": ["5minute", "15minute", "60minute"],
-  "SCAN_ZONE_CLASSES": ["demand", "supply"],
-  "DISABLED_ZONE_TYPES": ["RBD"],
-  "SCAN_WINDOW": {"start": "09:15", "end": "15:00"},
+  "SCAN_TIMEFRAMES": [
+    "5minute",
+    "15minute",
+    "60minute"
+  ],
+  "SCAN_ZONE_CLASSES": [
+    "demand",
+    "supply"
+  ],
+  "DISABLED_ZONE_TYPES": [
+    "RBD"
+  ],
+  "SCAN_WINDOW": {
+    "start": "09:15",
+    "end": "15:00"
+  },
   "MIN_BOOSTER_SCORE": 8,
   "MIN_CONFLUENCE": 2,
   "MIN_RISK_POINTS": 15,
@@ -27,5 +39,8 @@
   "OPTIONS_SL_PCT": 20,
   "DAILY_OPTIONS_TARGET": 750,
   "SCAN_INTERVAL_MINUTES": 1,
-  "AGENT_EVAL_ENABLED": false
+  "AGENT_EVAL_ENABLED": false,
+  "MIN_REMAINING_RR": 1.0,
+  "MIN_REMAINING_REWARD_FRACTION": 0.5,
+  "ENTRY_QUOTE_MAX_AGE_SECONDS": 5
 }

@@ -24,6 +24,11 @@ def time_to_expiry(expiry: str, as_of: str) -> float | None:
     try:
         end = datetime.fromisoformat(expiry).replace(hour=15, minute=30, second=0, microsecond=0)
         start = datetime.fromisoformat(as_of)
+        if start.tzinfo is not None:
+            from datetime import timezone, timedelta
+            ist = timezone(timedelta(hours=5, minutes=30))
+            start = start.astimezone(ist)
+            end = end.replace(tzinfo=ist)
         seconds = (end - start).total_seconds()
         return seconds / (365.0 * 24 * 3600) if seconds > 0 else None
     except (TypeError, ValueError):
@@ -53,14 +58,14 @@ def calculate_greeks(premium, underlying, strike, expiry, as_of, option_type,
         call=option_type == "CE"
         if option_type not in ("CE","PE"): return None
         t=time_to_expiry(expiry, as_of)
-        iv=implied_volatility(float(premium),s,k,t,call=call)
+        iv=implied_volatility(float(premium),s,k,t,r=RISK_FREE_RATE,q=DIVIDEND_YIELD,call=call)
         if iv is None: return None
         d1=(math.log(s/k)+(RISK_FREE_RATE-DIVIDEND_YIELD+iv*iv/2)*t)/(iv*math.sqrt(t)); d2=d1-iv*math.sqrt(t)
         delta=math.exp(-DIVIDEND_YIELD*t)*(_cdf(d1) if call else _cdf(d1)-1)
         gamma=math.exp(-DIVIDEND_YIELD*t)*_pdf(d1)/(s*iv*math.sqrt(t))
         theta=(-(s*math.exp(-DIVIDEND_YIELD*t)*_pdf(d1)*iv/(2*math.sqrt(t)))
-                -RISK_FREE_RATE*k*math.exp(-RISK_FREE_RATE*t)*(_cdf(d2) if call else _cdf(-d2))
-                +DIVIDEND_YIELD*s*math.exp(-DIVIDEND_YIELD*t)*(_cdf(d1) if call else _cdf(-d1)))/365
+                +RISK_FREE_RATE*k*math.exp(-RISK_FREE_RATE*t)*(-_cdf(d2) if call else _cdf(-d2))
+                +DIVIDEND_YIELD*s*math.exp(-DIVIDEND_YIELD*t)*(_cdf(d1) if call else -_cdf(-d1)))/365
         vega=s*math.exp(-DIVIDEND_YIELD*t)*_pdf(d1)*math.sqrt(t)/100
         return GreeksSnapshot(round(iv,6),round(delta,6),round(gamma,8),round(theta,6),round(vega,6),basis,as_of)
     except (TypeError, ValueError, ZeroDivisionError, OverflowError): return None

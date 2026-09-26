@@ -20,6 +20,27 @@ _GST_RATE              = 0.18     # 18% on brokerage + exchange
 _STAMP_RATE_BUY        = 0.00003  # 0.003% on buy-side value
 
 
+def estimate_order_cost(side: str, turnover: float) -> float:
+    """Standard retail NSE estimate only; actual net requires broker charges.
+
+    One brokerage charge per executed order, not per partial execution.
+    Rates checked 2026-09-26: https://zerodha.com/charges . Account plans,
+    broker square-off fees and contract-note rounding can differ. This helper
+    is for the execution ledger; legacy research helpers below are unchanged.
+    """
+    import math
+    if side not in ('BUY', 'SELL') or not math.isfinite(turnover) or turnover < 0:
+        raise ValueError('Invalid order cost inputs')
+    if turnover == 0:
+        return 0.0
+    exchange = 0.0003553 * turnover
+    sebi = 0.000001 * turnover
+    ipft = 0.000000001 * turnover
+    return round(_BROKERAGE_PER_ORDER + exchange + sebi + ipft +
+                 _GST_RATE * (_BROKERAGE_PER_ORDER + exchange + sebi + ipft) +
+                 (0.0015 if side == 'SELL' else _STAMP_RATE_BUY) * turnover, 2)
+
+
 def estimate_cost(entry_price: float, exit_price: float, lot_size: int) -> float:
     """
     Estimate total round-trip execution cost in rupees.

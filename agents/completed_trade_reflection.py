@@ -37,7 +37,8 @@ TRADE_FIELDS = (
     "options_symbol", "options_entry_price", "options_exit_price", "options_lot_size",
     "mode", "notes", "closed_by",
     "kite_order_id", "vix_at_signal", "option_fill_time", "underlying_at_option_fill",
-    "underlying_fill_basis", "signal_to_fill_seconds",
+    "underlying_fill_basis", "signal_to_fill_seconds", "underlying_observed_at",
+    "option_fill_time_basis", "options_entry_quantity", "options_gross_pnl_rs",
 )
 MARKET_CLOSE = time(15, 30)
 
@@ -159,8 +160,12 @@ def _holding_minutes(time_signal, exit_time) -> int | None:
     if not isinstance(time_signal, str) or not isinstance(exit_time, str):
         return None
     try:
-        start = datetime.strptime(time_signal, "%H:%M:%S")
-        end = datetime.strptime(exit_time, "%H:%M:%S")
+        if 'T' in exit_time:
+            end = datetime.fromisoformat(exit_time)
+            start = datetime.fromisoformat(time_signal) if 'T' in time_signal else datetime.combine(end.date(), time.fromisoformat(time_signal), tzinfo=end.tzinfo)
+        else:
+            start = datetime.strptime(time_signal, "%H:%M:%S")
+            end = datetime.strptime(exit_time, "%H:%M:%S")
     except ValueError:
         return None
     minutes = int((end - start).total_seconds() // 60)
@@ -171,7 +176,14 @@ def market_close_minutes(timestamp: str | None) -> int | None:
     if not isinstance(timestamp, str):
         return None
     try:
-        current = datetime.strptime(timestamp, "%H:%M:%S").time()
+        if 'T' in timestamp:
+            from datetime import timezone, timedelta
+            current = datetime.fromisoformat(timestamp)
+            if current.tzinfo is not None:
+                current = current.astimezone(timezone(timedelta(hours=5, minutes=30)))
+            current = current.time()
+        else:
+            current = datetime.strptime(timestamp, "%H:%M:%S").time()
     except ValueError:
         return None
     return max(0, int((datetime.combine(date.today(), MARKET_CLOSE) -
@@ -236,7 +248,7 @@ def option_outcome(trade: dict) -> OptionOutcome:
     points = _rounded(exit_price - entry)
     if points is None:
         return OptionOutcome(None, None, None)
-    lot = _finite_number(trade.get("options_lot_size"))
+    lot = _finite_number(trade.get("options_entry_quantity") if trade.get("options_entry_quantity") is not None else trade.get("options_lot_size"))
     rupees = None
     if lot is not None and lot > 0 and lot.is_integer():
         rupees = _rounded(points * lot)
@@ -264,18 +276,23 @@ def reflect_trade(trade: dict) -> KnowledgeEntry:
     context = option_context(trade)
     signal_time = trade.get("time_signal")
     fill_time = trade.get("option_fill_time") if isinstance(trade.get("option_fill_time"), str) else None
-    greek_time = fill_time or signal_time
-    greek_basis = "exact_fill_model" if fill_time and _finite_number(trade.get("underlying_at_option_fill")) is not None else "signal_time_proxy_model"
-    greek_underlying = trade.get("underlying_at_option_fill") if greek_basis == "exact_fill_model" else trade.get("entry")
-    greek_snapshot = calculate_greeks(_finite_number(trade.get("options_entry_price")),
-        greek_underlying, context.strike, context.expiry,
-        f"{trade.get('date')}T{greek_time}" if greek_time and trade.get("date") else None,
-        context.option_type, basis=greek_basis) if greek_time and context.strike and context.expiry else None
+    exact = (trade.get('underlying_fill_basis') == 'exact_fill_tick'
+             and trade.get('option_fill_time_basis') == 'broker_exchange_execution'
+             and fill_time and trade.get('underlying_observed_at') == fill_time)
+    observed = (trade.get('underlying_fill_basis') == 'confirmation_quote'
+                and trade.get('underlying_observed_at'))
+    greek_time = (fill_time if exact else trade.get('underlying_observed_at') if observed else signal_time)
+    greek_basis = 'exact_fill_model' if exact else 'confirmation_quote_proxy_model' if observed else 'signal_time_proxy_model'
+    greek_underlying = trade.get('underlying_at_option_fill') if exact or observed else trade.get('entry')
+    as_of = greek_time if greek_time and 'T' in greek_time else f"{trade.get('date')}T{greek_time}" if greek_time else None
+    greek_snapshot = calculate_greeks(_finite_number(trade.get('options_entry_price')),
+        greek_underlying, context.strike, context.expiry, as_of,
+        context.option_type, basis=greek_basis) if as_of and context.strike and context.expiry else None
     premium_pct = None
     if option.pnl_points is not None and _finite_number(trade.get("options_entry_price")):
         premium_pct = _rounded(option.pnl_points / float(trade["options_entry_price"]) * 100)
     signal_to_fill = _finite_number(trade.get("signal_to_fill_seconds"))
-    if signal_to_fill is None and fill_time:
+    if signal_to_fill is None and fill_time and trade.get('option_fill_time_basis') == 'broker_exchange_execution':
         signal_to_fill = (_holding_minutes(signal_time, fill_time) * 60
                           if _holding_minutes(signal_time, fill_time) is not None else None)
     fill_underlying = _rounded(trade.get("underlying_at_option_fill"))
@@ -283,7 +300,7 @@ def reflect_trade(trade: dict) -> KnowledgeEntry:
     vix_basis = "actual_fill_time" if vix is not None and fill_time else ("signal_time_proxy" if _finite_number(trade.get("vix_at_signal")) is not None else None)
     if vix is None:
         vix = _rounded(trade.get("vix_at_signal"))
-    close_basis = "option_fill_time" if fill_time else "signal_time_proxy"
+    close_basis = (trade.get('option_fill_time_basis') or 'unknown_fill_time') if fill_time else "signal_time_proxy"
     reflection_input = TradeReflectionInput(
         completed=True, zone_correct=zone_correct, option_correct=option.correct,
         option_pnl=option.pnl_points,
@@ -303,6 +320,7 @@ def reflect_trade(trade: dict) -> KnowledgeEntry:
         "option_pnl_rupees": option.pnl_rupees,
         "signal_time": signal_time,
         "option_fill_time": fill_time,
+        "option_fill_time_basis": trade.get('option_fill_time_basis'),
         "signal_to_fill_seconds": _rounded(signal_to_fill),
         "underlying_at_option_fill": fill_underlying,
         "underlying_fill_basis": trade.get("underlying_fill_basis") if fill_underlying is not None else None,

@@ -50,6 +50,25 @@ def sample_trade(**overrides):
     return row | overrides
 
 
+def test_confirmation_quote_is_never_exact_fill_model():
+    row = sample_trade(options_symbol='NIFTY2690824050PE', entry=24000,
+        option_fill_time='2026-09-04T10:00:02+05:30', option_fill_time_basis='broker_exchange_execution',
+        underlying_at_option_fill=24001, underlying_observed_at='2026-09-04T10:00:04+05:30',
+        underlying_fill_basis='confirmation_quote')
+    data = json.loads(reflect_trade(row).evidence[0])
+    assert data['greeks_basis_entry'] == 'confirmation_quote_proxy_model'
+    assert data['greeks_timestamp_entry'] == '2026-09-04T10:00:04+05:30'
+
+
+def test_legacy_local_fill_time_does_not_establish_exact_greeks():
+    row = sample_trade(options_symbol='NIFTY2690824050PE', entry=24000,
+        option_fill_time='10:00:02', option_fill_time_basis='legacy_local_clock',
+        underlying_at_option_fill=None)
+    data = json.loads(reflect_trade(row).evidence[0])
+    assert data['greeks_basis_entry'] == 'signal_time_proxy_model'
+    assert data['underlying_at_option_fill'] is None
+
+
 def make_db(path, rows, schema=SCHEMA):
     with closing(sqlite3.connect(path)) as connection:
         connection.execute(schema)

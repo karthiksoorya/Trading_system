@@ -133,8 +133,13 @@ KITE_TOKEN_MODE = "auto"
 TOKEN_PORT      = 5000
 
 # ── Computed ───────────────────────────────────────────────────────────────
-MAX_DAILY_LOSS   = CAPITAL * MAX_RISK_PCT          # ₹100
-RISK_PER_TRADE   = MAX_DAILY_LOSS / MAX_TRADES_PER_DAY  # ₹25
+MAX_DAILY_LOSS   = CAPITAL * MAX_RISK_PCT          # rupees
+RISK_PER_TRADE   = MAX_DAILY_LOSS / MAX_TRADES_PER_DAY  # rupees
+# Initial execution safety defaults; not optimized profitability thresholds.
+# Read from load_settings() at each BUY so overrides take effect immediately.
+MIN_REMAINING_RR = 1.0
+MIN_REMAINING_REWARD_FRACTION = 0.5
+ENTRY_QUOTE_MAX_AGE_SECONDS = 5
 
 # ── Data dir must exist ────────────────────────────────────────────────────
 DATA_DIR.mkdir(exist_ok=True)

@@ -141,8 +141,8 @@ def options_trail_exit(signal_id: int, entry_premium: float, current_premium: fl
     _send(
         f"📈 <b>Trade #{signal_id} — Options Profit Lock</b>\n"
         f"Premium: ₹{entry_premium:.2f} → ₹{current_premium:.2f} (+{gain_pct:.1f}%)\n"
-        f"Options P&L: ₹{options_pnl:+.0f}\n"
-        f"Exiting now to protect gains before theta erodes premium."
+        f"Unrealized gross: ₹{options_pnl:+.0f}\n"
+        f"Exit triggered; awaiting broker confirmation."
     )
 
 
@@ -152,17 +152,17 @@ def options_sl_exit(signal_id: int, entry_premium: float, current_premium: float
     _send(
         f"🛑 <b>Trade #{signal_id} — Options Stop Loss</b>\n"
         f"Premium: ₹{entry_premium:.2f} → ₹{current_premium:.2f} (−{loss_pct:.1f}%)\n"
-        f"Options P&L: ₹{options_pnl:+.0f}\n"
-        f"Cutting loss — index zone may be valid but premium has decayed too much."
+        f"Unrealized gross: ₹{options_pnl:+.0f}\n"
+        f"Exit triggered; awaiting broker confirmation."
     )
 
 
 def time_exit(signal_id: int, hour: int, options_pnl: float | None):
     """Fired when TIME_EXIT_HOUR is reached and trade is still open."""
-    pnl_str = f" | Options P&L: ₹{options_pnl:+.0f}" if options_pnl is not None else ""
+    pnl_str = f" | Unrealized gross: ₹{options_pnl:+.0f}" if options_pnl is not None else ""
     _send(
         f"⏰ <b>Trade #{signal_id} — Time Exit ({hour:02d}:00)</b>\n"
-        f"Index target not reached — closing to avoid afternoon theta decay.{pnl_str}"
+        f"Exit triggered; awaiting broker confirmation.{pnl_str}"
     )
 
 
@@ -212,9 +212,8 @@ def eod_signal_review(taken: list, simulated: list):
             emoji = "🎯" if t.get("result") == "win" else ("🛑" if t.get("result") == "loss" else "⏰")
             pnl_str = f"{t['pnl_points']:+.1f} pts" if t.get("pnl_points") is not None else "—"
             opts_str = ""
-            if t.get("options_entry_price") and t.get("options_exit_price"):
-                opts_pnl = (t["options_exit_price"] - t["options_entry_price"]) * (t.get("options_lot_size") or 65)
-                opts_str = f" | ₹{opts_pnl:+.0f}"
+            if t.get('options_gross_pnl_rs') is not None:
+                opts_str = ' | ' + accounting_text(t)
             reason = t.get("exit_reason", "")
             lines.append(f"{emoji} #{t['id']} {t['zone_type']} — {pnl_str}{opts_str} ({reason})")
 
@@ -246,15 +245,35 @@ def eod_signal_review(taken: list, simulated: list):
 
 
 def eod_summary(trades: int, wins: int, losses: int, total_pnl: float,
-                total_options_pnl: float | None = None):
+                total_options_pnl: float | None = None, accounting_basis: str = 'unknown'):
     pnl_str = f"+{total_pnl:.2f}" if total_pnl >= 0 else f"{total_pnl:.2f}"
     emoji = "📈" if total_pnl >= 0 else "📉"
     opts_line = ""
     if total_options_pnl is not None:
         opts_emoji = "✅" if total_options_pnl >= 0 else "❌"
-        opts_line = f"\n{opts_emoji} Options P&L: ₹{total_options_pnl:+.0f}"
+        opts_line = f"\n{opts_emoji} Options net ({accounting_basis}): ₹{total_options_pnl:+.2f}"
     _send(
         f"{emoji} <b>EOD Summary</b>\n"
         f"Trades: {trades} | Wins: {wins} | Losses: {losses}\n"
         f"Net Index P&L: {pnl_str} pts{opts_line}"
     )
+
+
+def accounting_text(trade):
+    gross = trade.get('options_gross_pnl_rs')
+    net = trade.get('options_net_pnl_rs')
+    estimated = trade.get('options_estimated_net_pnl_rs')
+    if gross is None:
+        return 'Options accounting: pending reconciliation'
+    text = f"Options gross: ₹{gross:+.2f}"
+    if net is not None:
+        text += f" | Charges: ₹{trade['options_charges_rs']:.2f} | Actual net: ₹{net:+.2f}"
+    elif estimated is not None:
+        text += f" | Estimated net: ₹{estimated:+.2f} (charges unreconciled)"
+    return text
+
+
+def execution_closed(trade):
+    _send(f"Trade #{trade['id']} closed — broker exit confirmed\n"
+          f"Exit fill time: {trade.get('option_exit_fill_time') or 'unknown'}\n"
+          f"{accounting_text(trade)}")

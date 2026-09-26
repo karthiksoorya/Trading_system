@@ -65,66 +65,9 @@ def _handle_callback(cb: dict, token: str):
     try:
         if action.startswith("approve_"):
             sig_id = int(action.split("_", 1)[1])
-            from journal.db import get_open_trades, approve_signal, get_signal, update_signal_order
-            import notify, config
-            if get_open_trades():
-                answer = "⚠️ Already have an open trade — reject it first."
-            else:
-                # BUG 16 fix: don't approve before order is placed.
-                # In paper mode approve immediately; in live mode approve only after
-                # the order is successfully placed, to avoid a race window where
-                # monitor_open_trades sees an 'approved' trade with no real entry.
-                row = get_signal(sig_id)
-                order_note = ""
-                _order_failed = False
-                if config.load_settings().get("MODE") == "live" and row:
-                    try:
-                        from brokers.kite_adapter import KiteAdapter
-                        _k = KiteAdapter()
-                        if not _k._token_loaded:
-                            # No token — approve anyway (paper-like behaviour) with a warning
-                            approve_signal(sig_id)
-                            logger.info("Telegram approved signal #%d (no token)", sig_id)
-                            order_note = "\n⚠️ No Kite token — NO real order placed. Save token in dashboard first."
-                        else:
-                            _k.validate_entry(row["entry"], row["stop_loss"], row["zone_class"])
-                            _contract = _k.get_options_contract(row["entry"], row["zone_class"])
-                            _qty      = _contract["lot_size"]
-                            _oid      = _k.place_options_order(_contract["symbol"], "BUY", _qty)
-                            # Order confirmed — now safe to approve
-                            approve_signal(sig_id)
-                            logger.info("Telegram approved signal #%d", sig_id)
-                            update_signal_order(sig_id, _oid, _contract["symbol"], _qty)
-                            order_note = f"\n🔴 LIVE ORDER: BUY {_contract['symbol']} ×{_qty} | Order #{_oid}"
-                            logger.info("Live entry order placed: %s order #%s", _contract["symbol"], _oid)
-                            # Fetch fill price in background — don't block Telegram callback
-                            import threading as _thr
-                            def _fetch_entry_fill(_ka=_k, _oid=_oid, _sid=sig_id):
-                                import time as _t; _t.sleep(3)
-                                try:
-                                    _fill = _ka.get_order_fill_price(_oid)
-                                    if _fill > 0:
-                                        from journal.db import update_signal_entry_price
-                                        update_signal_entry_price(_sid, _fill)
-                                except Exception as _fe:
-                                    logger.debug("Entry fill fetch failed: %s", _fe)
-                            _thr.Thread(target=_fetch_entry_fill, daemon=True).start()
-                    except Exception as _oe:
-                        from journal.db import reject_signal
-                        _fail_note = f"Order failed: {_oe}"
-                        reject_signal(sig_id, _fail_note)
-                        logger.error("Live entry order failed for signal #%d: %s", sig_id, _oe)
-                        answer = f"❌ Signal #{sig_id} order FAILED — auto-rejected. Approve next signal."
-                        notify._send(f"❌ Order FAILED for signal #{sig_id}:\n{_oe}\nSignal auto-rejected — approve the next one.")
-                        _order_failed = True
-                else:
-                    # Paper mode — approve immediately, no order to place
-                    approve_signal(sig_id)
-                    logger.info("Telegram approved signal #%d (paper)", sig_id)
-                if not _order_failed:
-                    answer = f"✅ Signal #{sig_id} approved!{order_note}"
-                    if row:
-                        notify.trade_approved(sig_id, row["entry"], row["stop_loss"], row["intraday_target"])
+            from engine.execution import submit_entry
+            outcome = submit_entry(sig_id, requester="telegram")
+            answer = f"Signal #{sig_id}: {outcome['status']} ({outcome.get('execution_state') or 'paper'})"
 
         elif action.startswith("reject_"):
             sig_id = int(action.split("_", 1)[1])
@@ -135,58 +78,16 @@ def _handle_callback(cb: dict, token: str):
 
         elif action.startswith("close_"):
             trade_id = int(action.split("_", 1)[1])
-            from journal.db import get_open_trades, close_trade
-            import notify
+            from engine.execution import request_exit
+            from journal.db import get_signal
             import config
-            open_trades = get_open_trades()
-            match = next((dict(r) for r in open_trades if r["id"] == trade_id), None)
-            if not match:
-                answer = f"⚠️ Trade #{trade_id} is not open."
-            else:
-                try:
-                    from brokers import get_broker
-                    ltp = get_broker().get_ltp(config.NIFTY_SYMBOL)
-                except Exception:
-                    ltp = match["entry"]
-                pnl = round(
-                    (ltp - match["entry"]) if match["zone_class"] == "demand"
-                    else (match["entry"] - ltp), 2
-                )
-                close_trade(trade_id, ltp, "manual", closed_by="telegram")
-                answer = f"🚨 Trade #{trade_id} closing at {ltp:.2f} | P&L: {pnl:+.2f} pts"
-                logger.info("Telegram manually closing trade #%d at %.2f", trade_id, ltp)
-                # ── Live: place SELL in background so Telegram callback answers fast ──
-                def _do_live_close(_match=match, _tid=trade_id, _ltp=ltp, _pnl=pnl):
-                    if config.load_settings().get("MODE") != "live":
-                        notify.trade_closed(_tid, _ltp, "manual", _pnl)
-                        return
-                    opts_sym = _match.get("options_symbol")
-                    if not opts_sym:
-                        notify._send(f"⚠️ No options symbol for trade #{_tid} — close manually on Kite!")
-                        return
-                    try:
-                        from brokers.kite_adapter import KiteAdapter
-                        from journal.db import update_signal_exit_order
-                        _ka = KiteAdapter()
-                        qty = _match.get("options_lot_size") or 0
-                        if not qty:
-                            qty = _ka.get_lot_size()
-                            logger.warning("options_lot_size missing for trade #%d — falling back to current lot size %d", _tid, qty)
-                        _sell_oid = _ka.place_options_order(opts_sym, "SELL", qty)
-                        logger.info("Live exit order placed: SELL %s ×%d → #%s", opts_sym, qty, _sell_oid)
-                        time.sleep(3)
-                        _fill = _ka.get_order_fill_price(_sell_oid)
-                        opts_pnl = None
-                        if _fill > 0:
-                            update_signal_exit_order(_tid, _sell_oid, _fill)
-                            entry_prem = _match.get("options_entry_price") or 0
-                            if entry_prem > 0:
-                                opts_pnl = round((_fill - entry_prem) * qty, 2)
-                        notify.trade_closed(_tid, _ltp, "manual", _pnl, options_pnl=opts_pnl)
-                    except Exception as ex:
-                        notify._send(f"⚠️ Exit order FAILED for {opts_sym}: {ex}\nClose manually on Kite!")
-                        logger.error("Live exit order failed: %s", ex)
-                threading.Thread(target=_do_live_close, daemon=True).start()
+            row = get_signal(trade_id)
+            index_price = None
+            if row and row['mode'] != 'live':
+                from brokers import get_broker
+                index_price = get_broker().get_ltp(config.NIFTY_SYMBOL)
+            outcome = request_exit(trade_id, requester="telegram", index_price=index_price)
+            answer = f"Exit #{trade_id}: {outcome['status']} ({outcome.get('execution_state') or 'paper'})"
 
     except Exception as e:
         answer = f"⚠️ Error: {e}"

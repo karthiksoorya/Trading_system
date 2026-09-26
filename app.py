@@ -20,9 +20,9 @@ import streamlit as st
 
 import config
 from journal.db import (
-    init_db, close_trade, trades_today, daily_pnl,
+    init_db, trades_today, daily_pnl,
     get_signals_for_date, get_pending_signals, pending_count,
-    approve_signal, reject_signal, reject_all_pending, get_open_trades,
+    reject_signal, reject_all_pending, get_open_trades,
     expire_stale_pending, expire_old_pending,
 )
 from journal.export import export_day
@@ -246,7 +246,7 @@ with st.sidebar:
     _pending = pending_count()
     st.metric("Pending",      f"🔔 {_pending} signal(s)" if _pending else "✅ None")
     st.metric("Trades Today", trades_today())
-    st.metric("Daily P&L",    f"{daily_pnl():.2f} pts")
+    st.metric("Daily Index P&L",    f"{daily_pnl():.2f} pts")
     st.divider()
 
     # ── Trading Mode switcher ─────────────────────────────────────────────
@@ -570,7 +570,9 @@ with tab_engine:
     s1, s2, s3, s4 = st.columns(4)
     s1.metric("Trades Today",  trades_today())
     s2.metric("Max Per Day",   config.MAX_TRADES_PER_DAY)
-    s3.metric("Daily P&L",     f"{daily_pnl():.2f} pts")
+    from journal.db import daily_rupee_accounting
+    _account = daily_rupee_accounting(mode='live')
+    s3.metric("Live option net (estimated charges)" if _account['basis'] != 'actual' else "Live option net", f"₹{_account['net']:.2f}" if _account['complete'] else "Needs reconciliation")
     s4.metric("Max Daily Loss", f"₹{config.MAX_DAILY_LOSS:.0f}")
 
     token_ok = config.TOKEN_FILE.exists()
@@ -745,6 +747,15 @@ with tab_engine:
         help="Signal only fires if LTP is within this many points of the zone proximal. "
              "30 = tight (enter near the line). Raising it enters further into the move — worse R:R.",
     )
+
+    st.markdown('**Execution safety limits**')
+    st.caption('Initial safety defaults, not optimized profitability thresholds. Checked immediately before a live BUY.')
+    remaining_rr = st.number_input('Minimum remaining reward / risk', min_value=0.0, step=0.1,
+        value=float(_current.get('MIN_REMAINING_RR', config.MIN_REMAINING_RR)))
+    remaining_fraction = st.number_input('Minimum fraction of planned reward remaining', min_value=0.0, step=0.05,
+        value=float(_current.get('MIN_REMAINING_REWARD_FRACTION', config.MIN_REMAINING_REWARD_FRACTION)))
+    quote_age = st.number_input('Maximum NIFTY quote age (seconds)', min_value=0.1, step=0.5,
+        value=float(_current.get('ENTRY_QUOTE_MAX_AGE_SECONDS', config.ENTRY_QUOTE_MAX_AGE_SECONDS)))
 
     min_risk = st.number_input(
         "Min Risk (points)",
@@ -939,6 +950,9 @@ with tab_engine:
                 "SCAN_TIMEFRAMES":       scan_tfs,
                 "SCAN_ZONE_CLASSES":     scan_classes,
                 "SIGNAL_EXPIRY_MINUTES": expiry_minutes,
+                'MIN_REMAINING_RR': remaining_rr,
+                'MIN_REMAINING_REWARD_FRACTION': remaining_fraction,
+                'ENTRY_QUOTE_MAX_AGE_SECONDS': quote_age,
                 "ZONE_APPROACH_POINTS":  zone_approach,
                 "MIN_RISK_POINTS":       min_risk,
                 "MIN_BOOSTER_SCORE":     min_score,
@@ -1051,6 +1065,7 @@ def _approvals_tab():
             zone_label = f"🟢 DEMAND {t['zone_type']}" if zone_class == "demand" else f"🔴 SUPPLY {t['zone_type']}"
             with st.container(border=True):
                 st.markdown(f"**#{t['id']} — {zone_label} | {t['timeframe']}**")
+                st.caption(f"Execution: {t['status']} / {t.get('execution_state') or 'paper'}")
                 c1, c2, c3, c4, c5 = st.columns(5)
                 c1.metric("Entry",  f"{entry:.2f}")
                 c2.metric("LTP",    f"{ltp:.2f}" if ltp else "—")
@@ -1065,39 +1080,21 @@ def _approvals_tab():
                 # ── Manual close ──────────────────────────────────────────
                 _confirm_key = f"_confirm_close_{t['id']}"
                 if st.session_state.get(_confirm_key):
-                    st.warning("⚠️ Confirm manual close — this will place a SELL order on Kite and close the trade.")
-                    if config.load_settings().get("MODE") == "live":
-                        st.info("🔴 LIVE MODE — system will place the SELL order on Kite automatically.")
+                    st.warning("Confirm exit request. A live trade closes only after the broker confirms the SELL fills.")
+                    if t['mode'] == 'live':
+                        st.info(f"Live position on {t.get('execution_broker') or 'unverified broker'}.")
                     _ca, _cb, _cc = st.columns([1, 1, 2])
                     if _ca.button("✅ Yes, close now", type="primary",
                                   use_container_width=True, key=f"close_yes_{t['id']}"):
-                        _exit = ltp or entry
-                        _pnl  = round((_exit - entry if zone_class == "demand" else entry - _exit), 2)
-                        # ── Live: place real options exit order ───────────
-                        if config.load_settings().get("MODE") == "live":
-                            _opts_sym = t.get("options_symbol")
-                            if _opts_sym:
-                                try:
-                                    from brokers.kite_adapter import KiteAdapter as _KA2
-                                    from journal.db import update_signal_exit_order as _useo
-                                    _ka2 = _KA2()
-                                    # BUG 1 fix: use stored lot size from entry, not live get_lot_size()
-                                    _qty2 = t.get("options_lot_size") or _ka2.get_lot_size()
-                                    _sell_oid = _ka2.place_options_order(_opts_sym, "SELL", _qty2)
-                                    st.toast(f"LIVE EXIT: SELL {_opts_sym} → order #{_sell_oid}", icon="🔴")
-                                    import time as _t2; _t2.sleep(3)
-                                    _sell_fill = _ka2.get_order_fill_price(_sell_oid)
-                                    if _sell_fill > 0:
-                                        _useo(t["id"], _sell_oid, _sell_fill)
-                                except Exception as _e2:
-                                    st.error(f"⚠️ Exit order failed: {_e2}\nClose manually on Kite!")
-                            else:
-                                st.warning("No options symbol stored — close position manually on Kite.")
-                        close_trade(t["id"], _exit, "manual", closed_by="dashboard")
-                        import notify as _n
-                        _n.trade_closed(t["id"], _exit, "manual", _pnl)
+                        _exit = ltp
+                        from engine.execution import request_exit
+                        try:
+                            outcome = request_exit(t['id'], requester="dashboard", index_price=_exit)
+                            st.toast(f"Exit #{t['id']}: {outcome['status']}")
+                        except Exception as exc:
+                            st.error(f"Exit remains unresolved: {exc}")
+                            st.stop()
                         st.session_state.pop(_confirm_key, None)
-                        st.toast(f"Trade #{t['id']} closed manually at {_exit:.2f}", icon="✅")
                         st.rerun()
                     if _cb.button("Cancel", use_container_width=True, key=f"close_no_{t['id']}"):
                         st.session_state.pop(_confirm_key, None)
@@ -1175,41 +1172,13 @@ def _approvals_tab():
 
                 ba, br, _ = st.columns([1, 1, 2])
                 if ba.button("✅ Approve", type="primary", use_container_width=True, key=f"app_{r['id']}"):
-                    approve_signal(r["id"])
-                    import notify
-                    # ── Live: place real options entry order ──────────────
-                    if config.load_settings().get("MODE") == "live":
-                        try:
-                            from brokers.kite_adapter import KiteAdapter as _KA
-                            from journal.db import update_signal_order
-                            _k   = _KA()
-                            if not _k._token_loaded:
-                                st.toast("⚠️ No Kite token — approval saved but NO real order placed. Go to Engine tab and save today's token first.", icon="⚠️")
-                            else:
-                                _k.validate_entry(r["entry"], r["stop_loss"], r["zone_class"])
-                                _contract = _k.get_options_contract(r["entry"], r["zone_class"])
-                                _qty      = _contract["lot_size"]
-                                _oid      = _k.place_options_order(_contract["symbol"], "BUY", _qty)
-                                update_signal_order(r["id"], _oid, _contract["symbol"], _qty)
-                                st.toast(
-                                    f"🔴 LIVE ORDER PLACED: BUY {_contract['symbol']} × {_qty} lots | "
-                                    f"Order #{_oid}", icon="🔴"
-                                )
-                                # Fetch actual fill price (wait for order to complete)
-                                import time as _t; _t.sleep(3)
-                                _fill = _k.get_order_fill_price(_oid)
-                                if _fill > 0:
-                                    from journal.db import update_signal_entry_price as _uep
-                                    _uep(r["id"], _fill)
-                                    st.toast(f"Entry premium recorded: ₹{_fill:.2f}", icon="📋")
-                        except Exception as _e:
-                            from journal.db import reject_signal
-                            reject_signal(r["id"], f"Order failed: {_e}")
-                            st.toast(f"❌ Order failed — signal #{r['id']} auto-rejected. Approve next signal.\n{_e}", icon="❌")
-                            st.rerun()
-                            st.stop()
-                    notify.trade_approved(r["id"], r["entry"], r["stop_loss"], r["intraday_target"])
-                    st.toast(f"Signal #{r['id']} approved — trade is active.", icon="✅")
+                    from engine.execution import submit_entry
+                    try:
+                        outcome = submit_entry(r['id'], requester="dashboard")
+                        st.toast(f"Entry #{r['id']}: {outcome['status']}")
+                    except Exception as exc:
+                        st.error(f"Entry not submitted: {exc}")
+                        st.stop()
                     st.rerun()
                 if br.button("❌ Reject", use_container_width=True, key=f"rej_{r['id']}"):
                     reject_signal(r["id"])
@@ -1225,6 +1194,43 @@ with tab_approvals:
 # ══════════════════════════════════════════════════════════════════════════
 with tab_signals:
     st.header("Signals")
+    with st.expander('Execution reconciliation'):
+        st.caption('Use broker-confirmed order IDs and actual contract-note charges. Missing data stays unknown.')
+        from journal.db import _conn as _execution_conn, record_actual_charges
+        with _execution_conn() as _con:
+            _execution_rows = [dict(r) for r in _con.execute(
+                'SELECT o.*, c.amount AS actual_charges FROM execution_orders o '
+                'LEFT JOIN execution_charges c ON c.order_id=o.id ORDER BY o.id DESC LIMIT 100')]
+        if _execution_rows:
+            st.dataframe(_execution_rows, hide_index=True, use_container_width=True)
+            _charge_orders = {str(r['id']): r for r in _execution_rows
+                              if r['status'] in ('COMPLETE', 'CANCELLED', 'REJECTED') and r['filled_quantity'] > 0}
+            if _charge_orders:
+                with st.form('actual_execution_charges'):
+                    _charge_id = st.selectbox('Executed order (local ID)', list(_charge_orders))
+                    _actual_charge = st.number_input('Total actual charges for this order (₹)', min_value=0.0, step=0.01)
+                    _charge_reference = st.text_input('Contract-note reference')
+                    if st.form_submit_button('Record actual charges'):
+                        try:
+                            record_actual_charges(int(_charge_id), _actual_charge, 'broker_contract_note', _charge_reference.strip())
+                            st.rerun()
+                        except ValueError as exc:
+                            st.error(str(exc))
+            _unknown_orders = {str(r['id']): r for r in _execution_rows
+                               if not r['broker_order_id'] and r['status'] in ('UNKNOWN', 'SUBMITTING')}
+            if _unknown_orders:
+                with st.form('recover_execution_order'):
+                    _unknown_id = st.selectbox('Unresolved submission (local ID)', list(_unknown_orders))
+                    _confirmed_id = st.text_input('Broker-confirmed order ID')
+                    if st.form_submit_button('Reconcile broker order'):
+                        from engine.execution import bind_broker_order, reconcile_trade
+                        try:
+                            bind_broker_order(int(_unknown_id), _confirmed_id.strip())
+                            _recovered = reconcile_trade(_unknown_orders[_unknown_id]['signal_id'])
+                            st.info(f"Trade status: {_recovered['status']}")
+                            st.rerun()
+                        except ValueError as exc:
+                            st.error(str(exc))
     _sf_c1, _sf_c2 = st.columns([2, 1])
     selected_date = _sf_c1.date_input("Date", value=date.today())
     _sig_mode_filter = _sf_c2.radio(
@@ -1245,20 +1251,16 @@ with tab_signals:
         elif _sig_mode_filter == "Live":
             df = df[df["mode"] == "live"]
 
-        # Compute actual options ₹ P&L where both entry and exit premium are known
-        if "options_entry_price" in df.columns and "options_exit_price" in df.columns:
-            lot = df.get("options_lot_size", 65).fillna(65).astype(int)
-            entry_p = pd.to_numeric(df["options_entry_price"], errors="coerce")
-            exit_p  = pd.to_numeric(df["options_exit_price"],  errors="coerce")
-            df["options_pnl_rs"] = ((exit_p - entry_p) * lot).round(2)
-
         display_cols = [
             "id", "mode", "status", "date", "time_signal", "zone_type", "zone_class", "timeframe",
             "entry", "stop_loss", "intraday_target",
             "booster_score", "confluence_count", "confluence_tfs",
             "entry_type", "position_size",
             "exit_price", "exit_reason", "pnl_points", "result",
-            "options_entry_price", "options_exit_price", "options_pnl_rs",
+            "options_entry_price", "options_exit_price", "options_entry_quantity", "options_exit_quantity",
+            "options_gross_pnl_rs", "options_charges_rs", "options_net_pnl_rs",
+            "options_estimated_net_pnl_rs", "accounting_status", "execution_state",
+            "option_fill_time", "option_fill_time_basis", "underlying_at_option_fill", "underlying_fill_basis",
             "kite_order_id", "options_symbol",
         ]
         display_cols = [c for c in display_cols if c in df.columns]
@@ -1286,7 +1288,7 @@ with tab_signals:
 
         # ── Close trade ───────────────────────────────────────────────────
         open_df = (
-            df[(df["exit_price"].isna()) & (df["status"] == "approved")]
+            df[df['status'].isin(['approved', 'entry_pending', 'exit_pending', 'reconciliation_required'])]
             if "exit_price" in df.columns and "status" in df.columns
             else pd.DataFrame()
         )
@@ -1310,8 +1312,13 @@ with tab_signals:
                     if exit_price == 0:
                         st.error("Enter a valid exit price.")
                     else:
-                        close_trade(trade_id, exit_price, exit_reason, notes, closed_by="dashboard")
-                        st.success(f"Trade #{trade_id} closed at {exit_price}.")
+                        from engine.execution import request_exit
+                        try:
+                            outcome = request_exit(trade_id, exit_reason, requester="dashboard", index_price=exit_price, notes=notes)
+                            st.info(f"Trade #{trade_id}: {outcome['status']}")
+                        except Exception as exc:
+                            st.error(f"Exit remains unresolved: {exc}")
+                            st.stop()
                         st.rerun()
         else:
             st.success("No open trades for this date.")

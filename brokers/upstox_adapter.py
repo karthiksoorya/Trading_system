@@ -52,6 +52,31 @@ _INTERVAL_V3: dict[str, tuple[str, str]] = {
 
 class UpstoxAdapter(BrokerBase):
 
+    broker_name = "upstox"
+
+    def cancel_execution_order(self, order_id):
+        response = requests.delete(f"{_BASE}/v2/order/cancel", headers=self._headers(),
+                                   params={'order_id': order_id}, timeout=10)
+        response.raise_for_status()
+
+    def get_underlying_observation(self, symbol):
+        from brokers.base import UnderlyingObservation, broker_time
+        response = requests.get(f"{_BASE}/v2/market-quote/quotes", headers=self._headers(),
+                                params={'instrument_key': self._resolve(symbol)}, timeout=10)
+        response.raise_for_status()
+        raw = next(iter(response.json()['data'].values()))
+        return UnderlyingObservation(float(raw['last_price']), broker_time(raw.get('timestamp')),
+                                     'confirmation_quote')
+
+    def get_order_execution(self, order_id):
+        from brokers.base import normalize_execution
+        def fetch(endpoint):
+            response = requests.get(f"{_BASE}/v2/order/{endpoint}",
+                                    headers=self._headers(), params={"order_id": order_id}, timeout=10)
+            response.raise_for_status()
+            return response.json()["data"]
+        return normalize_execution(order_id, fetch("details"), fetch("trades"))
+
     def __init__(self):
         self._access_token: str | None = None
         self._token_file = config.BASE_DIR / ".upstox_token"
@@ -301,7 +326,7 @@ class UpstoxAdapter(BrokerBase):
 
     # ── Order placement ────────────────────────────────────────────────────
 
-    def place_options_order(self, symbol: str, action: str, quantity: int) -> str:
+    def place_options_order(self, symbol: str, action: str, quantity: int, *, before_submit=None) -> str:
         """
         Place MIS limit order via Upstox HFT endpoint.
         symbol = instrument_key from get_options_contract() e.g. "NSE_FO|37668"
@@ -329,6 +354,8 @@ class UpstoxAdapter(BrokerBase):
         if order_type == "LIMIT":
             body["price"] = price
 
+        if before_submit is not None:
+            before_submit()
         resp = requests.post(
             f"{_HFT}/v2/order/place",
             headers={**self._headers(), "Content-Type": "application/json"},

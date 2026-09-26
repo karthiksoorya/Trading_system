@@ -22,19 +22,17 @@ import schedule
 
 import config
 
-# BUG 2 fix: prevent simultaneous exit orders from monitor + Telegram/dashboard
-_exit_lock = threading.Lock()
 from brokers import get_broker
 from engine.confluence import check_confluence
 from engine.zones import detect_zones, update_zone_state
 from engine.signals import generate_signal
 from engine.position_size import calculate as size_trade
 from journal.db import (init_db, log_signal, trades_today, daily_pnl, daily_options_pnl,
-                        get_open_trades, close_trade, zone_signaled_today, expire_old_pending,
-                        approve_signal, update_signal_order, update_signal_entry_price,
+                        get_open_trades, zone_signaled_today, expire_old_pending,
                         reject_signal, update_signal_sim_outcome, update_signal_agent_verdict)
 from journal.export import export_day
 import notify
+from engine.execution import submit_entry, request_exit, reconcile_open_trades, check_daily_loss
 
 logging.basicConfig(
     level=logging.INFO,
@@ -259,18 +257,16 @@ def _scan_core():
         logger.info("Max trades reached for today (%d).", _max_trades)
         return
 
-    _capital         = _s_early.get("CAPITAL",      config.CAPITAL)
-    _max_risk_pct    = _s_early.get("MAX_RISK_PCT",  config.MAX_RISK_PCT)
-    _max_daily_loss  = _capital * _max_risk_pct
-
-    if daily_pnl() <= -_max_daily_loss:
-        logger.warning("Daily loss limit hit (₹%.0f). No more trades today.", _max_daily_loss)
+    try:
+        check_daily_loss(_s_early)
+    except ValueError as exc:
+        logger.warning("New entries blocked: %s", exc)
         return
 
     _daily_options_target = _s_early.get("DAILY_OPTIONS_TARGET", config.DAILY_OPTIONS_TARGET)
     if _daily_options_target > 0:
         _opts_pnl = daily_options_pnl()
-        if _opts_pnl >= _daily_options_target:
+        if _opts_pnl is not None and _opts_pnl >= _daily_options_target:
             logger.info(
                 "Daily options target hit (₹%.0f ≥ ₹%.0f). Protecting gains — no more trades today.",
                 _opts_pnl, _daily_options_target,
@@ -560,41 +556,13 @@ def _scan_core():
                                else f"AUTO-FIRST {trades_today() + 1}/{_auto_first_n}")
                 logger.info("%s: attempting signal #%d", _auto_label, sig_id)
                 _auto_ok = False
-                if _s.get("MODE") == "live":
-                    try:
-                        if not broker.is_connected():
-                            logger.warning("AUTO-TRADE: broker not connected — falling back to manual approval.")
-                        else:
-                            broker.validate_entry(signal.entry, signal.stop_loss, signal.zone.zone_class)
-                            _contract = broker.get_options_contract(signal.entry, signal.zone.zone_class)
-                            _qty      = _contract["lot_size"]
-                            _oid      = broker.place_options_order(_contract["symbol"], "BUY", _qty)
-                            # Order placed — approve now and record
-                            approve_signal(sig_id)
-                            update_signal_order(sig_id, _oid, _contract["symbol"], _qty)
-                            logger.info("AUTO-TRADE placed: %s order #%s", _contract["symbol"], _oid)
-                            time.sleep(6)   # 6s: limit orders need time to settle before average_price is final
-                            _fill = broker.get_order_fill_price(_oid, retries=5, wait=3.0)
-                            if _fill > 0:
-                                update_signal_entry_price(sig_id, _fill)
-                            notify.signal_auto_approved(
-                                sig_id, signal.zone.zone_class,
-                                signal.entry, signal.stop_loss, signal.intraday_target,
-                                _contract["symbol"], _oid,
-                            )
-                            _auto_ok = True
-                    except Exception as _ae:
-                        logger.warning("AUTO-TRADE skipped for signal #%d: %s — sending for manual approval", sig_id, _ae)
-                        notify._send(f"⚠️ Auto-trade skipped for #{sig_id}:\n{_ae}\nSending for manual approval.")
-                else:
-                    # Paper mode: auto-approve without Kite order
-                    approve_signal(sig_id)
-                    notify._send(
-                        f"🤖 <b>Auto-Trade #{sig_id} (Paper)</b>\n"
-                        f"Entry: {signal.entry:.2f} | SL: {signal.stop_loss:.2f} | "
-                        f"Target: {signal.intraday_target:.2f}\nMonitoring..."
-                    )
-                    _auto_ok = True
+                try:
+                    execution = submit_entry(sig_id, broker=broker, requester="scheduler")
+                    _auto_ok = execution["status"] != "pending"
+                    notify._send(f"Entry #{sig_id}: {execution['status']} ({execution.get('execution_state') or 'paper'})")
+                except Exception as exc:
+                    logger.warning("Entry #%s not submitted: %s", sig_id, exc)
+                    notify._send(f"Entry #{sig_id} not submitted: {exc}")
 
                 # If auto-trade didn't happen, fall back to normal Telegram approval
                 if not _auto_ok:
@@ -626,56 +594,14 @@ def _scan_core():
                 )
 
 
-def _live_exit(trade: dict, reason: str):
-    """Place Kite SELL order for live trades and record fill price. Never blocks close.
-
-    BUG 1 fix: uses stored options_lot_size from DB (not live get_lot_size()) so the
-               SELL quantity always matches the original BUY quantity.
-    BUG 2 fix: acquires _exit_lock so only one exit order is placed even when
-               monitor_open_trades and Telegram close fire simultaneously.
-    """
-    if config.load_settings().get("MODE") != "live":
-        return
-    opts_sym = trade.get("options_symbol")
-    if not opts_sym:
-        logger.warning("Live exit skipped — no options_symbol for trade #%d", trade["id"])
-        notify._send(f"⚠️ Exit #{trade['id']} ({reason}): no options symbol — close manually on Kite!")
-        return
-
-    # Re-check DB status under the lock — bail out if already closed by another thread
-    with _exit_lock:
-        from journal.db import get_signal
-        current = get_signal(trade["id"])
-        if current and current["status"] == "closed":
-            logger.info("_live_exit: trade #%d already closed — skipping duplicate SELL", trade["id"])
-            return
-
-        # BUG 1 fix: use the lot size that was stored at entry time
-        qty = trade.get("options_lot_size") or 0
-        try:
-            from journal.db import update_signal_exit_order
-            if not qty:
-                qty = broker.get_lot_size() if hasattr(broker, "get_lot_size") else config.NIFTY_LOT_SIZE
-                logger.warning("options_lot_size missing for trade #%d — falling back to %d", trade["id"], qty)
-            _sell_oid = broker.place_options_order(opts_sym, "SELL", qty)
-            logger.info("Live exit order placed: SELL %s ×%d (%s) → order #%s", opts_sym, qty, reason, _sell_oid)
-            # Wait for fill then record actual exit premium
-            time.sleep(6)   # 6s: let broker settle average_price before reading
-            _fill = broker.get_order_fill_price(_sell_oid, retries=5, wait=3.0)
-            if _fill > 0:
-                update_signal_exit_order(trade["id"], _sell_oid, _fill)
-                logger.info("Options exit price recorded: %.2f for trade #%d", _fill, trade["id"])
-        except Exception as ex:
-            logger.error("Live exit order FAILED for %s: %s", opts_sym, ex)
-            notify._send(f"⚠️ Exit order FAILED for {opts_sym} ({reason}): {ex}\nClose manually on broker!")
-
-
-def _get_options_ltp(opts_sym: str) -> float | None:
+def _get_options_ltp(opts_sym: str, trade=None) -> float | None:
     """Fetch current options premium via the active broker. Returns None on failure."""
     if not opts_sym:
         return None
     try:
-        return broker.get_options_ltp(opts_sym)
+        from engine.execution import _broker
+        adapter = _broker(trade) if trade and trade.get('mode') == 'live' else broker
+        return adapter.get_options_ltp(opts_sym)
     except Exception as e:
         logger.debug("Options LTP fetch failed for %s: %s", opts_sym, e)
         return None
@@ -694,6 +620,7 @@ def monitor_open_trades():
     4. Options premium down >= OPTIONS_SL_PCT (loss cut)
     5. Time exit at TIME_EXIT_HOUR (afternoon theta cutoff)
     """
+    reconcile_open_trades()
     open_trades = get_open_trades()
     if not open_trades:
         return
@@ -709,10 +636,11 @@ def monitor_open_trades():
     options_sl_pct = _s.get("OPTIONS_SL_PCT",   config.OPTIONS_SL_PCT)
     time_exit_hr  = _s.get("TIME_EXIT_HOUR",    config.TIME_EXIT_HOUR)
     now_hour      = datetime.now().hour
-    now_minute    = datetime.now().minute
 
     for row in open_trades:
         t = dict(row)
+        if t["mode"] == "live" and (t["status"] not in ("approved", "entry_pending") or not t.get("options_entry_quantity")):
+            continue
         tid            = t["id"]
         zone_class     = t["zone_class"]
         entry          = t["entry"]
@@ -720,10 +648,10 @@ def monitor_open_trades():
         target         = t["intraday_target"]
         entry_premium  = t.get("options_entry_price") or 0
         opts_sym       = t.get("options_symbol") or ""
-        lot_size       = t.get("options_lot_size") or config.NIFTY_LOT_SIZE
+        lot_size       = max(0, (t.get('options_entry_quantity') or 0) - (t.get('options_exit_quantity') or 0))
 
         # ── Fetch live options premium ────────────────────────────────────
-        current_premium = _get_options_ltp(opts_sym) if opts_sym else None
+        current_premium = _get_options_ltp(opts_sym, t) if opts_sym else None
 
         closed = False
         close_reason = None
@@ -768,7 +696,7 @@ def monitor_open_trades():
                 closed = True
 
         # ── 4. Time exit ─────────────────────────────────────────────────
-        if not close_reason and time_exit_hr > 0 and now_hour >= time_exit_hr and now_minute == 0:
+        if not close_reason and time_exit_hr > 0 and now_hour >= time_exit_hr:
             opts_pnl = _calc_options_pnl(entry_premium, current_premium, lot_size) \
                        if (entry_premium > 0 and current_premium) else None
             logger.info(
@@ -780,37 +708,18 @@ def monitor_open_trades():
             close_reason, close_price = "time_exit", ltp
             closed = True
 
-        # ── Execute close ─────────────────────────────────────────────────
-        if close_reason and not closed:
-            # index-based exit (target or stoploss)
-            pnl = round(
-                (close_price - entry) if zone_class == "demand" else (entry - close_price), 2
-            )
-            opts_pnl = _calc_options_pnl(entry_premium, current_premium, lot_size) \
-                       if (entry_premium > 0 and current_premium) else None
-            _live_exit(t, close_reason)
-            close_trade(tid, close_price, close_reason, closed_by="system")
-            logger.info(
-                "AUTO-EXIT #%d %s at %.2f (LTP %.2f) | options P&L %s",
-                tid, close_reason.upper(), close_price, ltp,
-                f"₹{opts_pnl:+.0f}" if opts_pnl is not None else "n/a",
-            )
-            notify.trade_closed(tid, close_price, close_reason, pnl, options_pnl=opts_pnl)
-            closed = True
-        elif close_reason and closed:
-            # options trail or time exit — use current ltp as index close price
-            pnl = round(
-                (ltp - entry) if zone_class == "demand" else (entry - ltp), 2
-            )
-            _live_exit(t, close_reason)
-            close_trade(tid, ltp, close_reason, closed_by="system")
-
-        if closed:
+        # A trigger requests an exit; only confirmed fills complete a live trade.
+        if close_reason:
             try:
-                import autolearn
-                autolearn.check_and_learn()
-            except Exception as e:
-                logger.debug("autolearn error: %s", e)
+                outcome = request_exit(tid, close_reason, requester="system", index_price=close_price or ltp)
+                closed = outcome['status'] == 'closed'
+                if closed and outcome['mode'] != 'live':
+                    notify.trade_closed(tid, outcome['exit_price'], close_reason, outcome['pnl_points'])
+                if closed:
+                    import autolearn
+                    autolearn.check_and_learn()
+            except Exception as exc:
+                logger.warning("Exit #%s remains unresolved: %s", tid, exc)
 
 
 def check_pending_freshness():
@@ -857,10 +766,12 @@ def end_of_day():
             ltp = None
         for row in open_trades:
             t = dict(row)
-            exit_price = ltp or t["entry"]
-            _live_exit(t, "eod")
-            close_trade(t["id"], exit_price, "eod", closed_by="eod")
-            logger.info("EOD close #%d at %.2f", t["id"], exit_price)
+            exit_price = ltp
+            try:
+                outcome = request_exit(t['id'], "eod", requester="eod", index_price=exit_price)
+                logger.info("EOD #%s: %s", t['id'], outcome['status'])
+            except Exception as exc:
+                logger.warning("EOD #%s unresolved: %s", t['id'], exc)
 
     path = export_day()
     logger.info("End of day export → %s", path)
@@ -868,28 +779,17 @@ def end_of_day():
     from journal.db import get_signals_for_date
     from datetime import date as _date
     today = _date.today().isoformat()
-    closed = [dict(r) for r in get_signals_for_date(today) if r["result"] is not None]
+    closed = [dict(r) for r in get_signals_for_date(today) if r['status'] == 'closed']
     wins   = sum(1 for t in closed if t["result"] == "win")
     losses = sum(1 for t in closed if t["result"] == "loss")
     pnl    = daily_pnl()
 
-    # Compute real options P&L from stored fill prices
-    total_options_pnl = None
-    opts_trades = [
-        t for t in closed
-        if t.get("options_entry_price") and t.get("options_exit_price")
-    ]
-    if opts_trades:
-        total_options_pnl = sum(
-            (t["options_exit_price"] - t["options_entry_price"]) * (t.get("options_lot_size") or config.NIFTY_LOT_SIZE)
-            for t in opts_trades
-        )
-        total_options_pnl = round(total_options_pnl, 2)
-        logger.info("Real options P&L today: ₹%.2f across %d trade(s)", total_options_pnl, len(opts_trades))
-
+    from journal.db import daily_rupee_accounting
+    accounting = daily_rupee_accounting(today, mode='live')
+    total_options_pnl = accounting['net'] if accounting['complete'] else None
     logger.info("Daily Index P&L: %.2f pts", pnl)
     notify.eod_summary(trades=len(closed), wins=wins, losses=losses,
-                       total_pnl=pnl, total_options_pnl=total_options_pnl)
+                       total_pnl=pnl, total_options_pnl=total_options_pnl, accounting_basis=accounting["basis"])
 
 
 def _simulate_signal_outcome(signal: dict, candles: list) -> dict:
@@ -1017,6 +917,7 @@ def run():
     logger.info("Scan interval: every %d min", _scan_every)
     schedule.every(_scan_every).minutes.do(scan)
     schedule.every(1).minutes.do(monitor_open_trades)
+    schedule.every(2).seconds.do(reconcile_open_trades)
     schedule.every(1).minutes.do(check_pending_freshness)
     schedule.every().day.at("15:20").do(end_of_day)         # 10 min before close
     schedule.every().day.at("15:30").do(eod_signal_review)  # simulate skipped signals
@@ -1030,6 +931,7 @@ def run():
     _last_ltp        = None
     _flat_ticks      = 0          # consecutive 30s ticks with unchanged LTP
     _HOLIDAY_TICKS   = 30         # 30 × 30s = 15 min of no movement → holiday
+    _last_holiday_check = 0.0
 
     while True:
         schedule.run_pending()
@@ -1059,7 +961,8 @@ def run():
             break
 
         # ── Holiday detection: no LTP movement for 15 min ─────────────────
-        if is_market_open():
+        if is_market_open() and time.monotonic() - _last_holiday_check >= 30:
+            _last_holiday_check = time.monotonic()
             try:
                 ltp = broker.get_ltp(config.NIFTY_SYMBOL)
                 if ltp == _last_ltp:
@@ -1077,4 +980,4 @@ def run():
             except Exception:
                 pass   # network blip — don't stop, just skip this tick
 
-        time.sleep(30)
+        time.sleep(2)  # Service the two-second execution reconciliation job.
