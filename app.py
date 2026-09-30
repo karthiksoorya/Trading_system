@@ -769,10 +769,10 @@ with tab_engine:
     col_score, col_conf = st.columns(2)
     min_score = col_score.slider(
         "Min Booster Score",
-        min_value=8, max_value=10,
+        min_value=0, max_value=10,
         value=_current.get("MIN_BOOSTER_SCORE", config.MIN_BOOSTER_SCORE),
         step=1,
-        help="8 = standard, 9 = good setups only, 10 = perfect setups only.",
+        help="0-5 = loose (more signals, more noise), 8 = standard, 9 = good setups only, 10 = perfect setups only.",
     )
     min_conf = col_conf.slider(
         "Min Confluence (TFs)",
