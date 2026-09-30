@@ -722,38 +722,47 @@ def monitor_open_trades():
                 logger.warning("Exit #%s remains unresolved: %s", tid, exc)
 
 
-def check_pending_freshness():
-    """Filter 4: auto-expire pending signals where price has already touched the proximal.
-    If price enters the zone while signal is still waiting for approval, the entry is missed."""
-    from journal.db import get_pending_signals, expire_signal as _expire
+def retry_pending_entries():
+    """Retry auto-entry for still-pending signals as price approaches the zone.
+
+    validate_entry() (engine/entry_validation.py) only accepts an entry once price is
+    favorably close to it — a single attempt at signal-detection time in _scan_core()
+    is almost always premature, since price usually hasn't reached the zone yet. This
+    runs every minute so auto-trade gets repeated chances as price moves, instead of
+    only ever trying once and giving up.
+
+    This replaces the old "auto-expire the instant price touches the zone" behavior
+    (removed 2026-09-30): that logic raced directly against both auto-trade and manual
+    Telegram/dashboard approval, expiring signals in the exact narrow window
+    validate_entry() would otherwise have accepted them — on 2026-09-30 this produced
+    zero trades across 6 well-scored signals despite the engine working correctly.
+    validate_entry() already rejects genuinely late/broken entries (zero or negative
+    remaining reward/risk, zone broken beyond tolerance), making the old check
+    redundant now that a precise gate exists at actual submission time.
+    SIGNAL_EXPIRY_MINUTES (via expire_old_pending in run()) remains the timeout backstop.
+    """
+    from journal.db import get_pending_signals
     pending = get_pending_signals()
     if not pending:
         return
-    try:
-        ltp = broker.get_ltp(config.NIFTY_SYMBOL)
-    except Exception as e:
-        logger.debug("check_pending_freshness: LTP fetch failed — %s", e)
+    if get_open_trades():
         return
-
+    _s            = config.load_settings()
+    _fully_auto   = _s.get("FULLY_AUTOMATED", False)
+    _auto_first   = _s.get("AUTO_FIRST_TRADE", False)
+    _auto_first_n = _s.get("AUTO_FIRST_COUNT", config.AUTO_FIRST_COUNT)
+    if not (_fully_auto or (_auto_first and trades_today() < _auto_first_n)):
+        return
     for row in pending:
-        t          = dict(row)
-        proximal   = t["proximal"]
-        distal     = t["distal"]
-        zone_class = t["zone_class"]
-        sig_id     = t["id"]
-        # BUG 18 fix: expire only when LTP is actually INSIDE the zone (between distal and proximal),
-        # not just anywhere below proximal (demand) or above proximal (supply).
-        # Old logic expired signals even when LTP was far below the zone, which is too aggressive.
-        if zone_class == "demand":
-            touched = distal <= ltp <= proximal
-        else:
-            touched = proximal <= ltp <= distal
-        if touched:
-            _expire(sig_id, f"touched while pending — LTP {ltp:.2f} inside zone [{distal:.2f}–{proximal:.2f}]")
-            logger.info(
-                "Auto-expired pending #%d — LTP %.2f inside zone [%.2f–%.2f] while awaiting approval",
-                sig_id, ltp, distal, proximal,
-            )
+        sig_id = row["id"]
+        try:
+            execution = submit_entry(sig_id, broker=broker, requester="scheduler-retry")
+            if execution["status"] != "pending":
+                logger.info("Auto-entry succeeded on retry for signal #%d: %s", sig_id, execution["status"])
+                notify._send(f"Entry #{sig_id}: {execution['status']} ({execution.get('execution_state') or 'paper'})")
+                return   # one trade at a time — get_open_trades() re-checked next cycle
+        except Exception as exc:
+            logger.debug("Auto-entry retry #%d not yet ready: %s", sig_id, exc)
 
 
 def end_of_day():
@@ -918,7 +927,7 @@ def run():
     schedule.every(_scan_every).minutes.do(scan)
     schedule.every(1).minutes.do(monitor_open_trades)
     schedule.every(2).seconds.do(reconcile_open_trades)
-    schedule.every(1).minutes.do(check_pending_freshness)
+    schedule.every(1).minutes.do(retry_pending_entries)
     schedule.every().day.at("15:20").do(end_of_day)         # 10 min before close
     schedule.every().day.at("15:30").do(eod_signal_review)  # simulate skipped signals
     # NOTE: backup does NOT run from here — the run() loop exits at 15:35 (see
