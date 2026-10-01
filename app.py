@@ -1764,7 +1764,39 @@ with tab_learning:
     st.subheader("📚 Trading Lessons from Live Sessions")
     st.caption("Key patterns and rules extracted from real trades. Updated after each live session.")
 
-    with st.expander("Sep 4, 2026 — First trades after fixing engine entry point. Zone type analysis. Morning brief auto-config.", expanded=True):
+    with st.expander("Sep 30 - Oct 1, 2026 — Execution engine rewritten, a critical entry-race bug found & fixed, settings relaxed, first paper wins.", expanded=True):
+        st.markdown("""
+**Sep 30: order-execution path rewritten.** All order placement (auto-trade, Telegram approve, dashboard) now goes through one shared module, `engine/execution.py`, replacing three separate copies of ad-hoc logic. Key safety win: a database-level rule now guarantees only one unresolved order can ever exist per signal — closes the double-order risk a stray/duplicate engine process could otherwise cause.
+
+**Sep 30: that same day, zero trades happened despite 6 well-scored signals (all 9-10/10).** Root cause — two safety checks fought each other:
+- The **new** entry check only approves a trade if the reward/risk from the *current* price is still good — correctly rejects auto-trade's first attempt, since price hasn't reached the zone yet at signal-detection time.
+- An **old** rule auto-expired any pending signal the instant price touched the zone — exactly the moment the new check would have said yes.
+- Net effect: auto-trade was always too early, and by the time price arrived, the old rule had already killed the signal. No money was lost — every rejection correctly blocked before any order — but the system couldn't trade all day.
+
+**Fix (same day):** auto-trade now retries every minute while a signal is pending, instead of trying once and giving up. The old "expire on touch" rule was removed — redundant now that the new check does this more precisely, at the actual moment of submission.
+
+**Settings deliberately relaxed** (faster feedback over waiting weeks for a handful of trades):
+
+| Setting | Before | After |
+|---|---|---|
+| Min Confluence | 2 timeframes | **1** |
+| Min Booster Score | 8 | **6** |
+| Min Risk Points | 15 | **10** |
+| Zone Approach | 30 pts | **50 pts** |
+| Max Trades/Day | 3 | **5** |
+| RBD zone type | Disabled | **Re-enabled** (was disabled on only 3 trades — too small a sample to trust) |
+
+**Oct 1: first trades on the fixed system — both fixes validated.** 2 trades, 2 wins, +126.1 pts, paper mode:
+
+| Trade | Zone | Score | Confluence | Result |
+|-------|------|-------|------------|--------|
+| 884 | RBD supply (just re-enabled) | 6.0 | 1 | **+60.7 pts WIN** |
+| 885 | DBD supply | 6.0 | 1 | **+65.4 pts WIN** |
+
+Both trades had scores/confluence that would have been silently filtered out under the old thresholds — proof the relaxed settings are surfacing real opportunities, not just noise. Still running in paper mode; staying there until a few more days of data build up before considering live.
+""")
+
+    with st.expander("Sep 4, 2026 — First trades after fixing engine entry point. Zone type analysis. Morning brief auto-config.", expanded=False):
         st.markdown("""
 **2 trades. +65 index pts. First day of successful automated trading on VPS after fixing the engine entry point.**
 
