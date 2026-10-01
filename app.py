@@ -1796,6 +1796,67 @@ with tab_learning:
 Both trades had scores/confluence that would have been silently filtered out under the old thresholds — proof the relaxed settings are surfacing real opportunities, not just noise. Still running in paper mode; staying there until a few more days of data build up before considering live.
 """)
 
+    with st.expander("Sep 26, 2026 — CRITICAL: old zombie VPS instance found still running in parallel, stopped before it could place duplicate trades.", expanded=False):
+        st.markdown("""
+**Discovered while investigating a duplicate morning-brief Telegram message.** This server only sent one brief — the duplicate was coming from somewhere else entirely.
+
+Checked the Lightsail console: **two instances were running**, not one. The old pre-upgrade instance (512MB, a different IP) was never actually shut down when the Sep 8 RAM upgrade created a new instance from a snapshot — it had been sitting there running in parallel, forgotten, for 18 days. Its network address matched the very first Kite "IP not allowed" rejection from Aug 17 exactly, confirming it had been quietly active the whole time.
+
+**The real risk:** if its old Kite credentials and crontab were still active, it could have placed **duplicate real trades on the same account** starting the next trading day — not just duplicate notifications. Stopped via the Lightsail console before any trading-day risk materialized.
+
+**Rule confirmed:** after migrating a VPS via snapshot-to-new-instance, explicitly verify the OLD instance is stopped or terminated — don't assume it's gone just because a new one exists. Check the full instance list, not just the one you're connected to.
+""")
+
+    with st.expander("Sep 23-25, 2026 — First clean trade since the Sep 18 fixes. Two quiet days confirmed healthy, not broken.", expanded=False):
+        st.markdown("""
+**Sep 23: signal #877 — clean win, zone and option both correct.** DBD supply zone, entry 09:20, target hit 4 minutes later. Index +34.6 pts, options also gained. First fully clean trade since the Sep 18 infrastructure fixes went live.
+
+**Sep 24-25: zero signals both days — verified as genuine no-trade days, not an infra failure.** Checked directly: brief ran on time, token loaded well before 09:15, engine ran full clean sessions with zero errors. The system correctly found nothing worth trading — this is the filters working, not a bug.
+
+**Knowledge store confusion cleared up:** the 60-entry local knowledge file found earlier was a local backfill/test copy, never synced to the VPS. The real VPS knowledge store only grows from actual closed trades — as of Sep 26 it had exactly 2 real entries, matching the 2 trades since deployment. Saturday's pattern/hypothesis validation correctly reported "insufficient evidence" with only 2 samples — expected, not broken.
+""")
+
+    with st.expander("Sep 17-18, 2026 — Recurring Kite IP rejection diagnosed. Dashboard double-engine-start killed the engine mid-day.", expanded=False):
+        st.markdown("""
+**Sep 17: signal #874 — zone direction correct, option lost anyway.** RBR demand zone, index +8.6 pts (win — the zone call was right), but the option itself lost ₹945.75: too little index movement in too short a hold (33 min, forced time-exit) to overcome theta decay.
+
+**Sep 17: signal #873 — order silently rejected by Kite.** `IP not allowed to place orders for this app.` Same failure had hit on Aug 17 and would hit again — the VPS's IPv6 address changes on every reboot/snapshot restore, and Kite's allowlist is IPv4-oriented. Patched by re-whitelisting the current IPv6 in Kite's console (temporary — breaks again on next reboot; permanent fix is disabling IPv6 on the VPS, still pending).
+
+**Sep 18: engine died silently around 10:50 AM — no crash logged, no OOM, nobody clicked stop.** Root cause: the dashboard's "is the engine running?" check only trusted its own bookkeeping file, which never gets written when the engine starts via cron or SSH instead of the dashboard itself. When "Start Engine" was clicked without the dashboard realizing one was already running, it launched a **second competing engine process** against the same database — one of the two died with zero trace.
+
+**Fixed:** the dashboard now double-checks for a real running engine process directly, not just its own bookkeeping — closes this class of silent double-start for good.
+""")
+
+    with st.expander("Sep 10-11, 2026 — No-trade stall fully diagnosed: a genuinely thin market, not a bug. Settings sweep confirms the filters are correct.", expanded=False):
+        st.markdown("""
+**Zero trades Sep 5-11 (apart from Sep 4's 2) — confirmed the engine was healthy the whole time**, correctly staying out of a thin, low-opportunity stretch (falling market, low VIX).
+
+- The 60-minute trend filter correctly blocked demand/CE zones while NIFTY fell from ~24,000 to the 23,400s.
+- Most remaining misses were confluence (a zone on one timeframe with no agreeing zone on another) — the actual gate keeping trades out, not zone-approach distance or trend filtering.
+- Ran a full settings sweep against real historical data to check if any single knob was being too strict: loosening zone-approach distance alone, or removing the trend filter alone — still zero trades on this exact stretch. Lowering the confluence requirement did produce trades, but **every one was a loser** across both the stall window and the full 3-year history.
+- **Conclusion: confluence=2 was correctly filtering — loosening it doesn't unlock hidden edge, it just adds losing trades.** This was a genuinely thin fortnight for the strategy, not a config bug. (Settings were later relaxed anyway on Oct 1 as a deliberate choice to get faster feedback — see that entry above for how that's performing.)
+""")
+
+    with st.expander("Sep 9, 2026 — Engine crashed silently all day: a missing Python package, invisible until the first scan attempt.", expanded=False):
+        st.markdown("""
+**Zero trades — the engine never scanned once.** A required package (`schedule`) was listed in the project's dependency list but missing from the actual VPS install. Every cron-triggered start loaded the Kite token successfully, then crashed immediately after — before reaching the scan loop. Because the token load succeeds *before* the crash, nothing looked obviously wrong from Telegram or the dashboard; the only symptom all day was zero signals.
+
+**Fixed:** reinstalled dependencies from the project's requirement list, confirmed the engine ran past the crash point.
+
+**Rule confirmed:** after any VPS snapshot, restore, or memory-exhaustion recovery, always reinstall dependencies and check the engine log for a traceback the next morning — don't just check that the token loaded.
+""")
+
+    with st.expander("Sep 7, 2026 — Late login missed the best trading window. VPS ran out of memory. Learning framework deployed.", expanded=False):
+        st.markdown("""
+**Zero trades — token wasn't loaded until 10:33, well past the best entry window (09:15-10:30) where most zone setups trigger.** Overslept past market open; by the time login happened, the day's best opportunity had already passed.
+
+**Rule confirmed:** the token must be loaded before 09:15. Missing that first 75-minute window usually means no trades for the day, regardless of how the rest of the day plays out.
+
+**VPS ran out of memory that evening** after the after-hours analysis jobs ran back-to-back — the server's RAM (412MB at the time) was too small to handle the dashboard plus those jobs on the same day. Fixed with a reboot; upgraded to a larger VPS tier shortly after.
+
+**The learning framework was deployed this week** — the system now records a structured, private history of every closed trade (what the zone did, what the option did, why) as a foundation for pattern detection down the line.
+""")
+
     with st.expander("Sep 4, 2026 — First trades after fixing engine entry point. Zone type analysis. Morning brief auto-config.", expanded=False):
         st.markdown("""
 **2 trades. +65 index pts. First day of successful automated trading on VPS after fixing the engine entry point.**
