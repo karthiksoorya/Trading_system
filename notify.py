@@ -157,6 +157,21 @@ def options_sl_exit(signal_id: int, entry_premium: float, current_premium: float
     )
 
 
+def decay_exit(signal_id: int, held_minutes: float, entry_premium: float,
+               current_premium: float, gain_pct: float, options_pnl: float):
+    """Fired when a position has run past DECAY_EXIT_MINUTES without clearing
+    DECAY_EXIT_MIN_PROFIT_PCT — an experimental rule (paper-mode only until
+    validated) to cut theta/IV-crush exposure on trades that haven't resolved
+    quickly. See AGENT_KNOWLEDGE.md Oct 2026 entries for the evidence behind it."""
+    _send(
+        f"⏱️ <b>Trade #{signal_id} — Decay Exit (experimental)</b>\n"
+        f"Held {held_minutes:.0f} min without clearing the profit threshold.\n"
+        f"Premium: ₹{entry_premium:.2f} → ₹{current_premium:.2f} ({gain_pct:+.1f}%)\n"
+        f"Unrealized gross: ₹{options_pnl:+.0f}\n"
+        f"Exit triggered; awaiting broker confirmation."
+    )
+
+
 def time_exit(signal_id: int, hour: int, options_pnl: float | None):
     """Fired when TIME_EXIT_HOUR is reached and trade is still open."""
     pnl_str = f" | Unrealized gross: ₹{options_pnl:+.0f}" if options_pnl is not None else ""

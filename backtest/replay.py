@@ -42,8 +42,10 @@ EOD = time(15, 20)
 @dataclass
 class InstrumentSpec:
     name: str
-    kind: str                 # 'future' | 'option'
+    kind: str                 # 'future' | 'option' | 'spread'
     itm_steps: int = 1
+    short_itm_steps: int | None = None   # spread only: strike of the sold leg
+                                          # (same choose_strike scale: negative = OTM)
     expiry: str = "weekly"    # 'weekly' | 'monthly'
     slippage_pts: float = 0.0
 
@@ -54,6 +56,19 @@ INSTRUMENTS = [
     InstrumentSpec("opt_itm1",      "option", itm_steps=1, slippage_pts=1.5),   # current live
     InstrumentSpec("opt_itm3",      "option", itm_steps=3, slippage_pts=2.0),
     InstrumentSpec("opt_itm1_mono", "option", itm_steps=1, expiry="monthly", slippage_pts=2.0),
+    # Defined-risk debit spreads: buy the same long leg as opt_itm1/opt_atm,
+    # sell a further-OTM leg to collect premium back. Reduces net debit and
+    # therefore theta/IV-crush drag on a correct-direction-but-weak-move trade
+    # (exactly the ZONE_CORRECT_OPTION_WRONG failure mode seen live) at the
+    # cost of a capped maximum profit. Modeled as 4 full-cost legs (pessimistic
+    # — ignores any combo-order brokerage discount a broker might offer).
+    InstrumentSpec("spread_itm1_otm2", "spread", itm_steps=1, short_itm_steps=-2, slippage_pts=1.5),
+    InstrumentSpec("spread_atm_otm3",  "spread", itm_steps=0, short_itm_steps=-3, slippage_pts=1.5),
+    # Tighter spreads: the short leg sits closer to the money, so it carries
+    # real premium/theta to sell against — should offset decay much more than
+    # the wide spreads above, where the short leg was too far OTM to matter.
+    InstrumentSpec("spread_itm1_otm1", "spread", itm_steps=1, short_itm_steps=-1, slippage_pts=1.5),  # 100pt wide
+    InstrumentSpec("spread_atm_otm1",  "spread", itm_steps=0, short_itm_steps=-1, slippage_pts=1.5),  # 50pt wide
 ]
 
 
@@ -167,6 +182,42 @@ def _price_trade(spec: InstrumentSpec, pos: OpenPosition, exit_time: datetime,
         costs = future_roundtrip(fe, fx, LOT, cost_cfg) + spec.slippage_pts * LOT
         return gross, costs, gross - costs
 
+    if spec.kind == "spread":
+        opt_type = "CE" if pos.direction == "demand" else "PE"
+        exp = (monthly_expiry(pos.entry_time.date()) if spec.expiry == "monthly"
+               else next_weekly_expiry(pos.entry_time.date()))
+        long_c = OptionContract(strike=choose_strike(pos.entry_index, pos.direction, spec.itm_steps),
+                                expiry=exp, option_type=opt_type, lot_size=LOT)
+        short_c = OptionContract(strike=choose_strike(pos.entry_index, pos.direction, spec.short_itm_steps),
+                                 expiry=exp, option_type=opt_type, lot_size=LOT)
+
+        v_entry = md.vix_at(pos.entry_time) or 14.0
+        v_exit = md.vix_at(exit_time) or v_entry
+        extra = spec.slippage_pts
+
+        long_entry_mid = price_at(long_c, pos.entry_index, v_entry, pos.entry_time, params=mp)
+        long_exit_mid = price_at(long_c, exit_index, v_exit, exit_time, entry_spot=pos.entry_index, params=mp)
+        long_entry_prem = fill_price(long_entry_mid, "buy", mp) + extra
+        long_exit_prem = max(0.05, fill_price(long_exit_mid, "sell", mp) - extra)
+
+        short_entry_mid = price_at(short_c, pos.entry_index, v_entry, pos.entry_time, params=mp)
+        short_exit_mid = price_at(short_c, exit_index, v_exit, exit_time, entry_spot=pos.entry_index, params=mp)
+        # short leg opens by SELLING (receive below mid) and closes by BUYING back (pay above mid)
+        short_entry_prem = max(0.05, fill_price(short_entry_mid, "sell", mp) - extra)
+        short_exit_prem = fill_price(short_exit_mid, "buy", mp) + extra
+
+        long_gross = (long_exit_prem - long_entry_prem) * LOT
+        short_gross = (short_entry_prem - short_exit_prem) * LOT
+        gross = long_gross + short_gross
+
+        long_costs = option_roundtrip(long_entry_prem, long_exit_prem, LOT, cost_cfg)
+        # STT applies on the short leg's actual SELL (short_entry_prem); stamp duty on
+        # its actual BUY (short_exit_prem) — swap the args so option_roundtrip's
+        # buy_val/sell_val land on the right side for a position opened short.
+        short_costs = option_roundtrip(short_exit_prem, short_entry_prem, LOT, cost_cfg)
+        costs = long_costs + short_costs
+        return gross, costs, gross - costs
+
     # option
     opt_type = "CE" if pos.direction == "demand" else "PE"
     strike = choose_strike(pos.entry_index, pos.direction, spec.itm_steps)
@@ -262,7 +313,9 @@ def run_backtest(params: DSParams | None = None,
                     index_points=idx_pts, gross_pnl=gross, costs=costs, net_pnl=net,
                     exit_reason=reason,
                     meta={"booster": pos.booster, "zone": sig.zone.zone_type,
-                          "risk": round(abs(pos.entry_index - pos.stop_loss), 1)},
+                          "risk": round(abs(pos.entry_index - pos.stop_loss), 1),
+                          "target": pos.target, "stop_loss": pos.stop_loss,
+                          "vix_entry": vix},
                 ))
             last_exit = exit_time     # block re-entry until this trade is done
 

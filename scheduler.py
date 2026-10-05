@@ -618,7 +618,9 @@ def monitor_open_trades():
     2. Index SL hit
     3. Options premium up >= OPTIONS_TRAIL_PCT (profit lock)
     4. Options premium down >= OPTIONS_SL_PCT (loss cut)
-    5. Time exit at TIME_EXIT_HOUR (afternoon theta cutoff)
+    5. Decay exit: held >= DECAY_EXIT_MINUTES without clearing DECAY_EXIT_MIN_PROFIT_PCT
+       (experimental, off by default — see inline comment)
+    6. Time exit at TIME_EXIT_HOUR (afternoon theta cutoff)
     """
     reconcile_open_trades()
     open_trades = get_open_trades()
@@ -695,7 +697,40 @@ def monitor_open_trades():
                 close_reason, close_price = "options_sl", ltp
                 closed = True
 
-        # ── 4. Time exit ─────────────────────────────────────────────────
+        # ── 4. Decay exit (EXPERIMENTAL, off by default) ─────────────────
+        # Theta/IV-crush analysis (Oct 2026, both the 3-year backtest and the
+        # real live trade history) found decay costs roughly 10x what the
+        # directional edge earns, and that real trades held >30min are almost
+        # always net losers regardless of outcome, while trades resolving in
+        # under ~10min cluster near breakeven. This cuts a position that has
+        # run long without clearing a minimum profit threshold, rather than
+        # waiting for the much later TIME_EXIT_HOUR cutoff. Magnitude of
+        # benefit is NOT validated — a retrospective backtest attempt had too
+        # much option-pricing-model error on too few samples to trust a
+        # number. Paper-mode only until it proves itself on live-forward data.
+        decay_exit_min = _s.get("DECAY_EXIT_MINUTES", 0)
+        if (not close_reason and decay_exit_min > 0 and entry_premium > 0
+                and current_premium and t.get("time_signal") and t.get("date")):
+            decay_min_profit_pct = _s.get("DECAY_EXIT_MIN_PROFIT_PCT", 0)
+            try:
+                sig_dt = datetime.strptime(f"{t['date']} {t['time_signal']}", "%Y-%m-%d %H:%M:%S")
+                held_minutes = (datetime.now() - sig_dt).total_seconds() / 60
+            except ValueError:
+                held_minutes = None
+            if held_minutes is not None and held_minutes >= decay_exit_min:
+                gain_pct = (current_premium - entry_premium) / entry_premium * 100
+                if gain_pct < decay_min_profit_pct:
+                    opts_pnl = _calc_options_pnl(entry_premium, current_premium, lot_size)
+                    logger.info(
+                        "DECAY EXIT #%d — held %.0fmin, premium %.2f→%.2f (%.1f%% < %.1f%% required) options P&L ₹%.0f",
+                        tid, held_minutes, entry_premium, current_premium,
+                        gain_pct, decay_min_profit_pct, opts_pnl,
+                    )
+                    notify.decay_exit(tid, held_minutes, entry_premium, current_premium, gain_pct, opts_pnl)
+                    close_reason, close_price = "decay_exit", ltp
+                    closed = True
+
+        # ── 5. Time exit ─────────────────────────────────────────────────
         if not close_reason and time_exit_hr > 0 and now_hour >= time_exit_hr:
             opts_pnl = _calc_options_pnl(entry_premium, current_premium, lot_size) \
                        if (entry_premium > 0 and current_premium) else None
