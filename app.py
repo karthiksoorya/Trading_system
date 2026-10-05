@@ -1764,7 +1764,20 @@ with tab_learning:
     st.subheader("📚 Trading Lessons from Live Sessions")
     st.caption("Key patterns and rules extracted from real trades. Updated after each live session.")
 
-    with st.expander("Sep 30 - Oct 1, 2026 — Execution engine rewritten, a critical entry-race bug found & fixed, settings relaxed, first paper wins.", expanded=True):
+    with st.expander("Oct 5, 2026 — Real-money loss traced to ignoring our own prior backtest evidence. Confluence reverted, back to paper mode.", expanded=True):
+        st.markdown("""
+**Two real losing trades today, -₹1,972.75 total.** Both stop-losses fired exactly as designed — not a malfunction. But the deeper finding matters more than the loss itself:
+
+**Both losing trades only existed because confluence was relaxed from 2 to 1 on Oct 1 — and we already had evidence that change was a mistake.** A backtest run on Sep 11, against 3 years of real data, had already found: lowering confluence to 1 produces an index loss of -375 points and a 3.7% options win rate across 163 trades — a documented net-negative, not just "noisier." That result was already written into this project's history when the Oct 1 relaxation happened anyway, without being cross-checked against it.
+
+**This was not a flaw in the core strategy.** At the original settings, this system's trade history shows real edge — zone types with 79-100% win rates across dozens of trades. The mistake was overriding a setting we already had contrary evidence for.
+
+**Action taken:** Min Confluence reverted to 2. Mode reverted to paper. The other Oct 1 relaxations (booster score, zone approach, risk points, RBD re-enabled) are left in place for now, since — unlike confluence — we don't have prior evidence against them specifically. But they'll be tested properly in paper mode going forward, one change at a time, not bundled together.
+
+**Rule going forward:** before relaxing or tightening any setting, check whether it's already been tested. Change one thing at a time. A setting change on live money isn't the same bet as a paper-mode experiment.
+""")
+
+    with st.expander("Sep 30 - Oct 1, 2026 — Execution engine rewritten, a critical entry-race bug found & fixed, settings relaxed, first paper wins.", expanded=False):
         st.markdown("""
 **Sep 30: order-execution path rewritten.** All order placement (auto-trade, Telegram approve, dashboard) now goes through one shared module, `engine/execution.py`, replacing three separate copies of ad-hoc logic. Key safety win: a database-level rule now guarantees only one unresolved order can ever exist per signal — closes the double-order risk a stray/duplicate engine process could otherwise cause.
 
