@@ -1764,7 +1764,20 @@ with tab_learning:
     st.subheader("📚 Trading Lessons from Live Sessions")
     st.caption("Key patterns and rules extracted from real trades. Updated after each live session.")
 
-    with st.expander("Oct 5, 2026 — Real-money loss traced to ignoring our own prior backtest evidence. Confluence reverted, back to paper mode.", expanded=True):
+    with st.expander("Oct 6-7, 2026 — Paper mode was recording zero option prices; the decay-exit experiment had been silently inert. Fixed.", expanded=True):
+        st.markdown("""
+**User spotted it first** — a paper trade with a real index gain (+71.8 pts) showed no option or market price anywhere. Checked the database directly: every option-related field was blank on every paper trade since the Sep 30 execution rewrite. Paper mode had been tracking index points only, with zero visibility into option economics.
+
+**Bigger problem this uncovered:** the decay-exit experiment from Oct 5 depends entirely on an option price existing to compare against. Since that price was never recorded, **the experiment had fired zero times in two full days of paper trading** — not because it found nothing worth acting on, but because it structurally couldn't run at all.
+
+**Fixed:** paper mode now fetches a real, unplaced market quote for the same contract live mode would pick — so a paper trade is priced against the actual market, not left blank.
+
+**Also hit a GitHub-wide outage while deploying this** (confirmed via githubstatus.com — Git Operations, Pull Requests and Actions were all down, not something on our end). Worked around it by deploying the fix directly to the server over SSH instead of waiting for GitHub to recover.
+
+**Where things stand:** tomorrow is the first day that will actually show whether the decay-exit rule does anything useful — everything before this fix is not real evidence either way.
+""")
+
+    with st.expander("Oct 5, 2026 — Real-money loss traced to ignoring our own prior backtest evidence. Confluence reverted, back to paper mode.", expanded=False):
         st.markdown("""
 **Two real losing trades today, -₹1,972.75 total.** Both stop-losses fired exactly as designed — not a malfunction. But the deeper finding matters more than the loss itself:
 
