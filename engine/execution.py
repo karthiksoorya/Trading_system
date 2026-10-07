@@ -64,11 +64,32 @@ def submit_entry(signal_id, broker=None, requester='system'):
     if not trade or trade['status'] != 'pending':
         raise ValueError('Signal is not pending')
     if settings.get('MODE', config.MODE) != 'live':
+        # Paper mode still needs a real option price to be worth anything —
+        # the entry/exit price gates (options trail, options SL, decay exit)
+        # all depend on options_entry_price/options_symbol being set. Use the
+        # same contract selection as live and a real (unplaced) quote, so a
+        # paper trade is priced against the real market, not left blank.
+        paper_symbol = paper_entry_premium = paper_lot = None
+        try:
+            trade['execution_broker'] = settings.get('BROKER', config.BROKER)
+            paper_adapter = _broker(trade, broker)
+            if paper_adapter.is_connected():
+                contract = paper_adapter.get_options_contract(trade['entry'], trade['zone_class'])
+                paper_symbol = contract['symbol']
+                paper_lot = int(contract['lot_size'])
+                paper_entry_premium = paper_adapter.get_options_ltp(paper_symbol)
+        except Exception as exc:
+            logger.warning('Paper mode: option price simulation unavailable for signal %s: %s', signal_id, exc)
         with db._conn() as con:
             con.execute("BEGIN IMMEDIATE")
             if con.execute("SELECT id FROM signals WHERE status IN ('approved','entry_pending','exit_pending','reconciliation_required')").fetchone():
                 raise ValueError('Another trade is active')
-            con.execute("UPDATE signals SET status='approved', mode='paper' WHERE id=? AND status='pending'", (signal_id,))
+            con.execute(
+                "UPDATE signals SET status='approved', mode='paper', options_symbol=?, "
+                "options_entry_price=?, options_lot_size=?, options_entry_quantity=? "
+                "WHERE id=? AND status='pending'",
+                (paper_symbol, paper_entry_premium, paper_lot, paper_lot, signal_id),
+            )
         return dict(db.get_signal(signal_id))
     trade['execution_broker'] = settings.get('BROKER', config.BROKER)
     adapter = _broker(trade, broker)
@@ -179,7 +200,19 @@ def request_exit(signal_id, reason='manual', requester='system', broker=None, in
     if trade['mode'] != 'live':
         if index_price is None:
             raise ValueError('Paper close requires an observed index price')
-        db.close_trade(signal_id, index_price, reason, notes, closed_by=requester)
+        paper_exit_premium = None
+        opts_sym = trade.get('options_symbol')
+        if opts_sym:
+            try:
+                settings = config.load_settings()
+                trade['execution_broker'] = settings.get('BROKER', config.BROKER)
+                paper_adapter = _broker(trade, broker)
+                if paper_adapter.is_connected():
+                    paper_exit_premium = paper_adapter.get_options_ltp(opts_sym)
+            except Exception as exc:
+                logger.warning('Paper mode: option exit price unavailable for signal %s: %s', signal_id, exc)
+        db.close_trade(signal_id, index_price, reason, notes, closed_by=requester,
+                       options_exit_price=paper_exit_premium)
         return dict(db.get_signal(signal_id))
     adapter = _broker(trade, broker)
     trade = reconcile_trade(signal_id, adapter)

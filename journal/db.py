@@ -193,6 +193,7 @@ def close_trade(
     exit_reason: str,
     notes: str = "",
     closed_by: str = "system",
+    options_exit_price: float | None = None,
 ):
     """Update a signal row when the trade closes.
     closed_by: 'system' (target/SL), 'telegram', 'dashboard', 'eod'
@@ -223,7 +224,9 @@ def close_trade(
             """
             UPDATE signals
             SET status='closed', exit_time=?, exit_price=?, exit_reason=?,
-                pnl_points=?, result=?, notes=?, closed_by=?
+                pnl_points=?, result=?, notes=?, closed_by=?,
+                options_exit_price=COALESCE(?, options_exit_price),
+                options_exit_quantity=COALESCE(options_entry_quantity, options_exit_quantity)
             WHERE id=?
             """,
             (
@@ -234,6 +237,7 @@ def close_trade(
                 result,
                 notes,
                 closed_by,
+                options_exit_price,
                 signal_id,
             ),
         )
