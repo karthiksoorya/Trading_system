@@ -1764,7 +1764,22 @@ with tab_learning:
     st.subheader("📚 Trading Lessons from Live Sessions")
     st.caption("Key patterns and rules extracted from real trades. Updated after each live session.")
 
-    with st.expander("Oct 6-7, 2026 — Paper mode was recording zero option prices; the decay-exit experiment had been silently inert. Fixed.", expanded=True):
+    with st.expander("Oct 12, 2026 — Got real options data for free, and it reversed two of our backtest conclusions.", expanded=True):
+        st.markdown("""
+**Found a free dataset on Kaggle** (real NIFTY options, 1-minute, Oct 2024–Mar 2026, with Greeks included) and used it to re-check two ideas we'd previously tested with a pricing model instead of real market data.
+
+**Both ideas flipped from "rejected" to "this works," once tested on real prices:**
+- **Early exit** (closing a position after a fixed time if it hasn't moved enough): every time window tested now shows a real improvement, consistently — unlike the model-based version, which gave inconsistent, flip-flopping answers we couldn't trust.
+- **Confirmed entry** (waiting for the move to partly prove itself before buying the option): went from "actively hurts" (model-based) to the **best result we've found so far** — turning a real loss into something close to breakeven, on the trades it applied to.
+
+**Why the model was unreliable:** checked it against 20 real trades — it was nearly 2.5x too pessimistic on this batch, but too optimistic on an earlier single trade we'd checked. Not a fixable one-direction bias — genuinely unreliable trade-by-trade. This is exactly why real data was worth getting, even for free.
+
+**Honest caveat:** both reversed results are built on only 7-8 real trades. Promising enough to test properly in paper mode, not yet proven.
+
+**On buying more data:** found the right paid option for later — a ₹2,999/year pack (not the ₹7,999 one mentioned earlier) that would cover actual real trading history once needed. Holding off for now — letting paper mode run first to see if real trades alone are enough.
+""")
+
+    with st.expander("Oct 6-7, 2026 — Paper mode was recording zero option prices; the decay-exit experiment had been silently inert. Fixed.", expanded=False):
         st.markdown("""
 **User spotted it first** — a paper trade with a real index gain (+71.8 pts) showed no option or market price anywhere. Checked the database directly: every option-related field was blank on every paper trade since the Sep 30 execution rewrite. Paper mode had been tracking index points only, with zero visibility into option economics.
 
