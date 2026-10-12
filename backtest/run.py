@@ -66,13 +66,18 @@ def main():
     ap.add_argument("--curve-extreme", type=float, default=_d.curve_extreme_pct,
                     help="curve filter: top/bottom fraction of the range treated as stretched (default %(default)s)")
     ap.add_argument("--time-exit-hour", type=int, default=13)
-    ap.add_argument("--entry-mode", choices=["limit", "market"], default="limit",
+    ap.add_argument("--entry-mode", choices=["limit", "market", "confirmed"], default="limit",
                     help="limit = order at zone proximal, no fill if price never returns; "
-                         "market = fill next bar open (current live behaviour)")
+                         "market = fill next bar open (current live behaviour); "
+                         "confirmed = wait for --confirm-frac of the entry->target move before buying")
     ap.add_argument("--entry-delay-bars", type=int, default=0,
                     help="market mode: extra 5-min bars between signal and fill (approval lag)")
     ap.add_argument("--entry-delay-frac", type=float, default=0.0,
                     help="market mode: fraction into the fill bar (0=open,1=close) for sub-bar lag")
+    ap.add_argument("--confirm-frac", type=float, default=0.3,
+                    help="confirmed mode: fraction of entry->target move required before buying (default 0.3)")
+    ap.add_argument("--confirm-trail-stop", action="store_true",
+                    help="confirmed mode: tighten stop at fill to preserve original R:R from the new entry")
     ap.add_argument("--csv", default=None)
     args = ap.parse_args()
 
@@ -86,6 +91,8 @@ def main():
         max_risk_points=args.max_risk,
         entry_delay_bars=args.entry_delay_bars,
         entry_delay_frac=args.entry_delay_frac,
+        confirm_frac=args.confirm_frac,
+        confirm_trail_stop=args.confirm_trail_stop,
         trend_filter=not args.no_trend_filter,
         ce_after_11=not args.no_ce_time_filter,
         vix_direction_filter=not args.no_vix_filter,

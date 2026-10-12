@@ -49,6 +49,8 @@ class DSParams:
     # fraction into the fill bar (0=open, 1=close) for sub-bar "few seconds" drift.
     entry_delay_bars: int = 0
     entry_delay_frac: float = 0.0
+    confirm_frac: float = 0.0   # entry_mode="confirmed" only: fraction of entry->target move required before buying
+    confirm_trail_stop: bool = False  # confirmed mode only: tighten stop at fill to preserve original R:R from the new entry, instead of keeping the original fixed stop (which worsens remaining R:R as entry moves closer to target)
     scan_start: time = time(9, 15)
     scan_end: time = time(13, 0)
     time_exit_hour: int = 13

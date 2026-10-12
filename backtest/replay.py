@@ -102,6 +102,16 @@ def _entry_fill(sig, bars: pd.DataFrame, decision_bi: int, decision_time: dateti
     limit  : rest at sig.entry (the zone proximal); fill the first later bar whose
              range spans it, within SIGNAL_EXPIRY_MINUTES and before the time-exit
              cutoff. If price never returns to the zone, the order cancels — None.
+    confirmed : do not buy at the zone touch. Wait until price has already moved
+             params.confirm_frac of the way from entry toward target (same
+             direction), then buy the option AT THAT LATER PRICE instead of the
+             zone proximal. Target/stop are unchanged — only entry (and therefore
+             remaining hold time to target) shifts. Skip entirely (None) if price
+             never confirms, or hits stop/expires first. Motivated by the
+             confirmed theta/IV-crush finding: a correct zone call still loses on
+             the option when held the full distance; entering only after partial
+             confirmation buys less remaining time to decay through, at the cost
+             of a smaller captured move and of missing trades that fail early.
     """
     n = len(bars)
     if decision_bi + 1 >= n:
@@ -114,6 +124,33 @@ def _entry_fill(sig, bars: pd.DataFrame, decision_bi: int, decision_time: dateti
         if params.entry_delay_frac:
             px += params.entry_delay_frac * (float(bar.close) - float(bar.open))
         return fb, bar.date.to_pydatetime(), px
+
+    if mode == "confirmed":
+        proximal = sig.entry
+        dir_sign = 1.0 if sig.zone.zone_class == "demand" else -1.0
+        confirm_level = proximal + dir_sign * params.confirm_frac * abs(sig.intraday_target - proximal)
+        deadline = decision_time + timedelta(minutes=params.signal_expiry_minutes)
+        touched_zone = False
+        for j in range(decision_bi + 1, n):
+            b = bars.iloc[j]
+            bt = b.date.to_pydatetime()
+            if bt > deadline:
+                return None
+            if params.time_exit_hour and bt.time() >= time(params.time_exit_hour, 0):
+                return None
+            lo, hi = float(b.low), float(b.high)
+            if not touched_zone and lo <= proximal <= hi:
+                touched_zone = True
+            if not touched_zone:
+                continue
+            # Stop hit before confirmation — the zone failed, no trade.
+            if dir_sign > 0 and lo <= sig.stop_loss:
+                return None
+            if dir_sign < 0 and hi >= sig.stop_loss:
+                return None
+            if (dir_sign > 0 and hi >= confirm_level) or (dir_sign < 0 and lo <= confirm_level):
+                return j, bt, confirm_level
+        return None
 
     if mode != "limit":
         raise ValueError(f"unknown entry_mode {mode!r}")
@@ -290,10 +327,19 @@ def run_backtest(params: DSParams | None = None,
             if fill is None:
                 continue                      # limit order never touched — no trade
             fill_bi, entry_time, entry_index = fill
+            stop_loss = sig.stop_loss
+            if entry_mode == "confirmed" and params.confirm_trail_stop:
+                # Preserve the ORIGINAL 2:1 reward:risk from the new entry point,
+                # instead of keeping the old fixed stop (which only gets worse as
+                # entry moves closer to target — see the non-trailing test).
+                dir_sign = 1.0 if sig.zone.zone_class == "demand" else -1.0
+                remaining_reward = abs(sig.intraday_target - entry_index)
+                new_risk = remaining_reward / 2.0
+                stop_loss = entry_index - dir_sign * new_risk
             pos = OpenPosition(
                 signal_id=None, direction=sig.zone.zone_class,
                 entry_time=entry_time, entry_index=entry_index,
-                stop_loss=sig.stop_loss, target=sig.intraday_target,
+                stop_loss=stop_loss, target=sig.intraday_target,
                 booster=sig.boosters.total,
             )
             strat.mark_trade_taken()
