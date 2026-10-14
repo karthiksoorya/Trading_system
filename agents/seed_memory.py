@@ -28,7 +28,7 @@ _ROOT        = Path(__file__).parent.parent
 _MEMORY_PATH = Path(__file__).parent / "memory.json"
 _AGENT_DIR   = Path(__file__).parent
 _DB_PATH     = _ROOT / "data" / "trades.db"
-_KNOWLEDGE   = _ROOT / "AGENT_KNOWLEDGE.md"
+_KNOWLEDGE   = _ROOT / "data" / "AGENT_KNOWLEDGE.md"
 _MODEL       = "claude-sonnet-5"
 
 

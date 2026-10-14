@@ -6,7 +6,7 @@ from agents.hypothesis_validator import validate
 from agents.knowledge_store import KnowledgeStore, DEFAULT_PATH
 from agents.learning_models import KnowledgeEntry, KnowledgeStatus
 
-HUMAN_KNOWLEDGE = Path(__file__).resolve().parents[1] / "AGENT_KNOWLEDGE.md"
+HUMAN_KNOWLEDGE = Path(__file__).resolve().parents[1] / "data" / "AGENT_KNOWLEDGE.md"
 
 def _candidate(path, hypothesis_id, **kwargs):
     result=validate(path, **kwargs)

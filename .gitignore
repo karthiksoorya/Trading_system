@@ -196,7 +196,6 @@ docs/credentials.txt
 gdrive_credentials.json
 gdrive_token.json
 SYSTEM_LOCAL.md
-AGENT_KNOWLEDGE.md
 
 # Agent runtime files (machine-specific, not shared)
 agents/memory.json
