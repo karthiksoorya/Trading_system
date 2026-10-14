@@ -96,7 +96,13 @@ ZONE_APPROACH_POINTS   = 30   # LTP must be within this many pts of proximal (wa
 #   lock in profit by exiting. e.g. 30 → exit when CE/PE is up 30%.
 #   Set to 0 to disable.
 OPTIONS_TRAIL_PCT   = 30    # exit when options up 30% from entry premium
-OPTIONS_SL_PCT      = 20   # exit when options down 20% from entry premium (0 = disabled)
+OPTIONS_SL_PCT      = 7    # exit when options down 7% from entry premium (0 = disabled)
+                           # Oct 14 2026: tested 5/7/10/15/20% against real premium paths for
+                           # 20 trades (Kaggle real-data validation) - anything above ~10-15%
+                           # is worse than no options-SL at all (loose stop lets losses run with
+                           # no offsetting benefit). 5-10% all outperform; 7% chosen as a real,
+                           # data-backed tightening without chasing the single best point in a
+                           # 20-trade sample (5% was marginally best but within sample noise).
 #
 # TIME_EXIT_HOUR: close any open trade at this hour (24h) if index target
 #   not yet hit. Prevents theta decay from eating gains in the afternoon.
