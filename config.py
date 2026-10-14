@@ -104,6 +104,18 @@ OPTIONS_SL_PCT      = 7    # exit when options down 7% from entry premium (0 = d
                            # data-backed tightening without chasing the single best point in a
                            # 20-trade sample (5% was marginally best but within sample noise).
 #
+# EXECUTION_STYLE: "single" (default, current behaviour) = buy one option
+#   (1-ITM) per signal, as today. "spread" = a directional credit spread
+#   instead (bull put spread for demand signals, bear call spread for
+#   supply) - sell a near-the-money option, buy a further-OTM option for
+#   protection, same width both ways. Receives a net credit instead of
+#   paying a net debit, so time decay works FOR the position instead of
+#   against it - see AGENT_KNOWLEDGE.md Oct 14 2026 entry: tested on real
+#   premium data, net result ~75% better than single-leg on the same 20
+#   trades. NOT YET LIVE-TESTED - keep as "single" until explicitly chosen.
+EXECUTION_STYLE     = "single"   # "single" | "spread"
+SPREAD_WIDTH_POINTS = 100         # spread mode only: distance between short and long strikes
+#
 # TIME_EXIT_HOUR: close any open trade at this hour (24h) if index target
 #   not yet hit. Prevents theta decay from eating gains in the afternoon.
 #   e.g. 13 → exit at 13:00 if still open.
@@ -191,6 +203,8 @@ SCAN_TIMEFRAMES       = _s.get("SCAN_TIMEFRAMES",       [TF_LOWER, TF_INTERMEDIA
 SCAN_ZONE_CLASSES     = _s.get("SCAN_ZONE_CLASSES",     ["supply"])   # CE off — demand had negative 3y expectancy
 DAILY_OPTIONS_TARGET  = _s.get("DAILY_OPTIONS_TARGET",  DAILY_OPTIONS_TARGET)
 OPTIONS_SL_PCT        = _s.get("OPTIONS_SL_PCT",         OPTIONS_SL_PCT)
+EXECUTION_STYLE       = _s.get("EXECUTION_STYLE",        EXECUTION_STYLE)
+SPREAD_WIDTH_POINTS   = _s.get("SPREAD_WIDTH_POINTS",    SPREAD_WIDTH_POINTS)
 MIN_BASE_CANDLES        = _s.get("MIN_BASE_CANDLES",        MIN_BASE_CANDLES)
 MIN_DEPARTURE_STRENGTH  = _s.get("MIN_DEPARTURE_STRENGTH",  MIN_DEPARTURE_STRENGTH)
 MIN_ZONE_WIDTH_ATR_MULT = _s.get("MIN_ZONE_WIDTH_ATR_MULT", MIN_ZONE_WIDTH_ATR_MULT)

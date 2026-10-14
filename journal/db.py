@@ -490,6 +490,12 @@ def _migrate_execution(con):
         "options_charges_rs": "REAL", "options_net_pnl_rs": "REAL",
         "options_estimated_charges_rs": "REAL", "options_estimated_net_pnl_rs": "REAL",
         "accounting_status": "TEXT",
+        # Spread mode (EXECUTION_STYLE="spread"): options_symbol/options_entry_price/
+        # options_exit_price (existing columns, above) track the LONG/protective leg.
+        # These track the SHORT leg. Single mode never touches these (stay NULL).
+        "spread_short_symbol": "TEXT", "spread_short_entry_price": "REAL",
+        "spread_short_exit_price": "REAL", "spread_short_lot_size": "INTEGER",
+        "execution_style": "TEXT",
     }
     existing = {r[1] for r in con.execute("PRAGMA table_info(signals)")}
     for name, kind in columns.items():
@@ -501,6 +507,7 @@ def _migrate_execution(con):
         CREATE TABLE IF NOT EXISTS execution_orders (
             id INTEGER PRIMARY KEY, signal_id INTEGER NOT NULL REFERENCES signals(id),
             broker TEXT NOT NULL, broker_order_id TEXT, side TEXT NOT NULL,
+            leg TEXT NOT NULL DEFAULT 'single',
             requested_quantity INTEGER NOT NULL, filled_quantity INTEGER NOT NULL DEFAULT 0,
             status TEXT NOT NULL, requested_at TEXT NOT NULL, confirmed_at TEXT,
             exit_reason TEXT, requester TEXT, error TEXT,
@@ -521,6 +528,11 @@ def _migrate_execution(con):
             reconciled_at TEXT NOT NULL, basis TEXT NOT NULL CHECK(basis='actual')
         );
     """)
+    # CREATE TABLE IF NOT EXISTS above is a no-op on an already-existing
+    # execution_orders table, so 'leg' needs its own explicit migration.
+    existing_eo_cols = {r[1] for r in con.execute("PRAGMA table_info(execution_orders)")}
+    if "leg" not in existing_eo_cols:
+        con.execute("ALTER TABLE execution_orders ADD COLUMN leg TEXT NOT NULL DEFAULT 'single'")
 
 
 def execution_orders(signal_id):
