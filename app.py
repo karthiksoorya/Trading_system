@@ -1764,7 +1764,20 @@ with tab_learning:
     st.subheader("📚 Trading Lessons from Live Sessions")
     st.caption("Key patterns and rules extracted from real trades. Updated after each live session.")
 
-    with st.expander("Oct 12, 2026 — Got real options data for free, and it reversed two of our backtest conclusions.", expanded=True):
+    with st.expander("Oct 14, 2026 — Best structural idea yet: a credit spread cuts real losses by ~75%. Switch built to choose it later, execution engine deliberately not rushed.", expanded=True):
+        st.markdown("""
+**Checked open interest (OI) as a predictive signal — no usable pattern found.** Matches what the user suspected: OI likely matters at weekly/monthly horizons, not for trades lasting a few minutes. Confirmed and parked, not pursued further.
+
+**Tightened the options stop-loss from 20% to 7%, backed by real data.** Walked real minute-by-minute premium paths for the trades we already validated: anything looser than ~10-15% turned out to be worse than having no stop at all — the old 20% default was actively costing money. 5-10% all performed well; chose 7% as a solid middle ground rather than chasing the single best number in a small sample.
+
+**Tested something genuinely new: a credit spread instead of a plain option purchase — the best result found so far.** Instead of buying an option (paying for time decay), sell one near the money and buy a further-out one for protection — you receive money upfront, and time decay now works *for* you instead of against you, while keeping the same proven-good directional call. On the same 20 real trades: **-₹11,515 (current approach) → about -₹2,885 (credit spread, after real costs) — roughly a 75% smaller loss.**
+
+**Before getting ahead of ourselves, checked what it actually takes to trade this safely.** Turns out each leg has to be sent as a separate order — there's no single "spread order" button at the exchange level. That means careful sequencing matters: always secure the protective leg before selling the risky one, and always close the risky leg before releasing the protection. Got that sequencing worked out properly.
+
+**What shipped today:** a switch to choose between "single option" and "spread" mode later, plus the database groundwork for it — tested against a real copy of the full trade history to make sure nothing existing breaks. **What didn't ship:** the actual spread trading logic itself. The part of the system that decides whether a real position is open or closed needs careful, dedicated rework to handle two legs safely — not something to rush just to finish today. The economics case is strong and proven; building it right comes next.
+""")
+
+    with st.expander("Oct 12, 2026 — Got real options data for free, and it reversed two of our backtest conclusions.", expanded=False):
         st.markdown("""
 **Found a free dataset on Kaggle** (real NIFTY options, 1-minute, Oct 2024–Mar 2026, with Greeks included) and used it to re-check two ideas we'd previously tested with a pricing model instead of real market data.
 
