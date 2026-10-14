@@ -69,15 +69,35 @@ def submit_entry(signal_id, broker=None, requester='system'):
         # all depend on options_entry_price/options_symbol being set. Use the
         # same contract selection as live and a real (unplaced) quote, so a
         # paper trade is priced against the real market, not left blank.
+        #
+        # EXECUTION_STYLE="spread": paper-only simulation of a directional credit
+        # spread (bull put / bear call) - see get_spread_contracts(). This never
+        # touches the live broker reconciliation path (_record_snapshot, real
+        # order placement) at all, so it's safe to test here even though the
+        # equivalent LIVE execution engine hasn't been built yet (see
+        # memory/project_spread_execution_engine.md for why that's deferred).
+        style = settings.get('EXECUTION_STYLE', config.EXECUTION_STYLE)
         paper_symbol = paper_entry_premium = paper_lot = None
+        short_symbol = short_entry_premium = short_lot = None
         try:
             trade['execution_broker'] = settings.get('BROKER', config.BROKER)
             paper_adapter = _broker(trade, broker)
             if paper_adapter.is_connected():
-                contract = paper_adapter.get_options_contract(trade['entry'], trade['zone_class'])
-                paper_symbol = contract['symbol']
-                paper_lot = int(contract['lot_size'])
-                paper_entry_premium = paper_adapter.get_options_ltp(paper_symbol)
+                if style == 'spread':
+                    width = float(settings.get('SPREAD_WIDTH_POINTS', config.SPREAD_WIDTH_POINTS))
+                    legs = paper_adapter.get_spread_contracts(trade['entry'], trade['zone_class'], width)
+                    long_c, short_c = legs['long'], legs['short']
+                    paper_symbol = long_c['symbol']
+                    paper_lot = int(long_c['lot_size'])
+                    paper_entry_premium = paper_adapter.get_options_ltp(paper_symbol)
+                    short_symbol = short_c['symbol']
+                    short_lot = int(short_c['lot_size'])
+                    short_entry_premium = paper_adapter.get_options_ltp(short_symbol)
+                else:
+                    contract = paper_adapter.get_options_contract(trade['entry'], trade['zone_class'])
+                    paper_symbol = contract['symbol']
+                    paper_lot = int(contract['lot_size'])
+                    paper_entry_premium = paper_adapter.get_options_ltp(paper_symbol)
         except Exception as exc:
             logger.warning('Paper mode: option price simulation unavailable for signal %s: %s', signal_id, exc)
         with db._conn() as con:
@@ -85,12 +105,21 @@ def submit_entry(signal_id, broker=None, requester='system'):
             if con.execute("SELECT id FROM signals WHERE status IN ('approved','entry_pending','exit_pending','reconciliation_required')").fetchone():
                 raise ValueError('Another trade is active')
             con.execute(
-                "UPDATE signals SET status='approved', mode='paper', options_symbol=?, "
-                "options_entry_price=?, options_lot_size=?, options_entry_quantity=? "
+                "UPDATE signals SET status='approved', mode='paper', execution_style=?, options_symbol=?, "
+                "options_entry_price=?, options_lot_size=?, options_entry_quantity=?, "
+                "spread_short_symbol=?, spread_short_entry_price=?, spread_short_lot_size=? "
                 "WHERE id=? AND status='pending'",
-                (paper_symbol, paper_entry_premium, paper_lot, paper_lot, signal_id),
+                (style, paper_symbol, paper_entry_premium, paper_lot, paper_lot,
+                 short_symbol, short_entry_premium, short_lot, signal_id),
             )
         return dict(db.get_signal(signal_id))
+    if settings.get('EXECUTION_STYLE', config.EXECUTION_STYLE) == 'spread':
+        # The live two-leg execution engine (safe fill sequencing, reconciliation,
+        # partial-fill handling) is deliberately not built yet - see
+        # memory/project_spread_execution_engine.md. Refuse loudly rather than
+        # silently falling back to single-leg live trading under a setting that
+        # says "spread".
+        raise ValueError('EXECUTION_STYLE=spread is paper-mode only — live spread execution is not yet built')
     trade['execution_broker'] = settings.get('BROKER', config.BROKER)
     adapter = _broker(trade, broker)
     if not adapter.is_connected():
@@ -201,7 +230,9 @@ def request_exit(signal_id, reason='manual', requester='system', broker=None, in
         if index_price is None:
             raise ValueError('Paper close requires an observed index price')
         paper_exit_premium = None
+        short_exit_premium = None
         opts_sym = trade.get('options_symbol')
+        short_sym = trade.get('spread_short_symbol')
         if opts_sym:
             try:
                 settings = config.load_settings()
@@ -209,10 +240,13 @@ def request_exit(signal_id, reason='manual', requester='system', broker=None, in
                 paper_adapter = _broker(trade, broker)
                 if paper_adapter.is_connected():
                     paper_exit_premium = paper_adapter.get_options_ltp(opts_sym)
+                    if short_sym:
+                        short_exit_premium = paper_adapter.get_options_ltp(short_sym)
             except Exception as exc:
                 logger.warning('Paper mode: option exit price unavailable for signal %s: %s', signal_id, exc)
         db.close_trade(signal_id, index_price, reason, notes, closed_by=requester,
-                       options_exit_price=paper_exit_premium)
+                       options_exit_price=paper_exit_premium,
+                       spread_short_exit_price=short_exit_premium)
         return dict(db.get_signal(signal_id))
     adapter = _broker(trade, broker)
     trade = reconcile_trade(signal_id, adapter)

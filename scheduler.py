@@ -651,9 +651,32 @@ def monitor_open_trades():
         entry_premium  = t.get("options_entry_price") or 0
         opts_sym       = t.get("options_symbol") or ""
         lot_size       = max(0, (t.get('options_entry_quantity') or 0) - (t.get('options_exit_quantity') or 0))
+        is_spread      = t.get("execution_style") == "spread"
 
         # ── Fetch live options premium ────────────────────────────────────
         current_premium = _get_options_ltp(opts_sym, t) if opts_sym else None
+
+        # Spread mode: options_* columns hold the LONG/protective leg; the
+        # short leg lives in spread_short_*. Net credit remaining = what it
+        # would cost to close right now (buy back short, sell long) vs the
+        # net credit received at entry. Paper-mode only (see
+        # memory/project_spread_execution_engine.md) - OPTIONS_TRAIL_PCT and
+        # OPTIONS_SL_PCT are deliberately NOT applied to spreads yet; those
+        # percentage formulas were validated for a single purchased premium,
+        # not a defined-risk spread's economics, and inventing an equivalent
+        # without testing it would repeat the exact mistake (Oct 5) this
+        # project already learned from. Index stop/target, decay-exit, and
+        # time-exit still protect a spread position same as a single one.
+        spread_gain_pct = None
+        if is_spread:
+            short_sym = t.get("spread_short_symbol") or ""
+            short_entry = t.get("spread_short_entry_price") or 0
+            short_current = _get_options_ltp(short_sym, t) if short_sym else None
+            if short_entry and current_premium is not None and short_current is not None:
+                entry_credit = short_entry - entry_premium
+                current_debit = short_current - current_premium
+                if entry_credit:
+                    spread_gain_pct = (entry_credit - current_debit) / entry_credit * 100
 
         closed = False
         close_reason = None
@@ -671,8 +694,8 @@ def monitor_open_trades():
             elif ltp >= stop_loss:
                 close_reason, close_price = "stoploss", stop_loss
 
-        # ── 2. Options trailing profit lock ──────────────────────────────
-        if not close_reason and trail_pct > 0 and entry_premium > 0 and current_premium:
+        # ── 2. Options trailing profit lock (single-leg only, see note above) ──
+        if not close_reason and not is_spread and trail_pct > 0 and entry_premium > 0 and current_premium:
             gain_pct = (current_premium - entry_premium) / entry_premium * 100
             if gain_pct >= trail_pct:
                 opts_pnl = _calc_options_pnl(entry_premium, current_premium, lot_size)
@@ -684,8 +707,8 @@ def monitor_open_trades():
                 close_reason, close_price = "options_trail", ltp
                 closed = True
 
-        # ── 3. Options SL — cut loss when premium drops too far ──────────
-        if not close_reason and options_sl_pct > 0 and entry_premium > 0 and current_premium:
+        # ── 3. Options SL — cut loss when premium drops too far (single-leg only) ──
+        if not close_reason and not is_spread and options_sl_pct > 0 and entry_premium > 0 and current_premium:
             loss_pct = (entry_premium - current_premium) / entry_premium * 100
             if loss_pct >= options_sl_pct:
                 opts_pnl = _calc_options_pnl(entry_premium, current_premium, lot_size)
@@ -709,8 +732,9 @@ def monitor_open_trades():
         # much option-pricing-model error on too few samples to trust a
         # number. Paper-mode only until it proves itself on live-forward data.
         decay_exit_min = _s.get("DECAY_EXIT_MINUTES", 0)
+        _decay_ready = (is_spread and spread_gain_pct is not None) or (not is_spread and current_premium)
         if (not close_reason and decay_exit_min > 0 and entry_premium > 0
-                and current_premium and t.get("time_signal") and t.get("date")):
+                and _decay_ready and t.get("time_signal") and t.get("date")):
             decay_min_profit_pct = _s.get("DECAY_EXIT_MIN_PROFIT_PCT", 0)
             try:
                 sig_dt = datetime.strptime(f"{t['date']} {t['time_signal']}", "%Y-%m-%d %H:%M:%S")
@@ -718,15 +742,22 @@ def monitor_open_trades():
             except ValueError:
                 held_minutes = None
             if held_minutes is not None and held_minutes >= decay_exit_min:
-                gain_pct = (current_premium - entry_premium) / entry_premium * 100
-                if gain_pct < decay_min_profit_pct:
+                if is_spread:
+                    gain_pct = spread_gain_pct
+                    short_entry = t.get("spread_short_entry_price") or 0
+                    short_current = _get_options_ltp(t.get("spread_short_symbol") or "", t)
+                    opts_pnl = ((short_entry - entry_premium) - (short_current - current_premium)) * lot_size \
+                               if short_current is not None else None
+                else:
+                    gain_pct = (current_premium - entry_premium) / entry_premium * 100
                     opts_pnl = _calc_options_pnl(entry_premium, current_premium, lot_size)
+                if gain_pct < decay_min_profit_pct:
                     logger.info(
-                        "DECAY EXIT #%d — held %.0fmin, premium %.2f→%.2f (%.1f%% < %.1f%% required) options P&L ₹%.0f",
-                        tid, held_minutes, entry_premium, current_premium,
-                        gain_pct, decay_min_profit_pct, opts_pnl,
+                        "DECAY EXIT #%d — held %.0fmin, premium %.2f→%.2f (%.1f%% < %.1f%% required) options P&L %s",
+                        tid, held_minutes, entry_premium, current_premium, gain_pct, decay_min_profit_pct,
+                        f"₹{opts_pnl:.0f}" if opts_pnl is not None else "n/a",
                     )
-                    notify.decay_exit(tid, held_minutes, entry_premium, current_premium, gain_pct, opts_pnl)
+                    notify.decay_exit(tid, held_minutes, entry_premium, current_premium, gain_pct, opts_pnl or 0.0)
                     close_reason, close_price = "decay_exit", ltp
                     closed = True
 

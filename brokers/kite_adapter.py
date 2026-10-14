@@ -277,6 +277,62 @@ class KiteAdapter(BrokerBase):
             f"or {expiry + timedelta(days=7)}. Check logs for available expiries."
         )
 
+    def get_spread_contracts(self, ltp: float, direction: str, width_points: float = 100) -> dict:
+        """Find the two legs of a directional CREDIT spread: bull put spread for
+        direction='demand' (sell a PUT near spot, buy a further-OTM PUT below it
+        for protection), bear call spread for 'supply' (sell a CALL near spot,
+        buy a further-OTM CALL above it). Opposite option type from
+        get_options_contract() by design - that buys CE/PE for direction, this
+        sells PE/CE (puts profit when price stays up or rises; calls profit
+        when price stays down or falls) with a protective long leg capping risk.
+
+        Returns {"short": {...}, "long": {...}} - same per-leg shape as
+        get_options_contract()'s return dict.
+        """
+        from datetime import date, timedelta
+
+        if direction == "demand":
+            option_type = "PE"
+            atm = round(ltp / 50) * 50
+            short_strike, long_strike = atm, atm - width_points
+        else:
+            option_type = "CE"
+            atm = round(ltp / 50) * 50
+            short_strike, long_strike = atm, atm + width_points
+
+        today = date.today()
+        days_ahead = (1 - today.weekday()) % 7
+        if days_ahead <= 1:
+            days_ahead += 7
+        expiry = today + timedelta(days=days_ahead)
+        instruments = self._get_instruments("NFO")
+
+        def _norm_expiry(val):
+            if val is None:
+                return None
+            if hasattr(val, "date"):
+                return val.date()
+            if isinstance(val, str):
+                return date.fromisoformat(val[:10])
+            return val
+
+        def _find(strike):
+            for expiry_try in [expiry, expiry + timedelta(days=7)]:
+                for inst in instruments:
+                    if (inst.get("name") == "NIFTY" and inst.get("instrument_type") == option_type
+                            and inst.get("strike") == float(strike)
+                            and _norm_expiry(inst.get("expiry")) == expiry_try):
+                        return {
+                            "symbol": inst["tradingsymbol"], "token": inst["instrument_token"],
+                            "strike": strike, "expiry": expiry_try.isoformat(),
+                            "option_type": option_type,
+                            "lot_size": int(inst.get("lot_size", config.NIFTY_LOT_SIZE)),
+                        }
+            raise ValueError(f"NIFTY {option_type} strike {strike} not found for expiry {expiry} "
+                             f"or {expiry + timedelta(days=7)}")
+
+        return {"short": _find(short_strike), "long": _find(long_strike)}
+
     def validate_entry(self, entry: float, stop_loss: float, zone_class: str) -> None:
         """Raise ValueError if current Nifty price has moved too far from the entry zone."""
         ltp = self.get_ltp(config.NIFTY_SYMBOL)
