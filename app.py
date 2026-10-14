@@ -1774,7 +1774,9 @@ with tab_learning:
 
 **Before getting ahead of ourselves, checked what it actually takes to trade this safely.** Turns out each leg has to be sent as a separate order — there's no single "spread order" button at the exchange level. That means careful sequencing matters: always secure the protective leg before selling the risky one, and always close the risky leg before releasing the protection. Got that sequencing worked out properly.
 
-**What shipped today:** a switch to choose between "single option" and "spread" mode later, plus the database groundwork for it — tested against a real copy of the full trade history to make sure nothing existing breaks. **What didn't ship:** the actual spread trading logic itself. The part of the system that decides whether a real position is open or closed needs careful, dedicated rework to handle two legs safely — not something to rush just to finish today. The economics case is strong and proven; building it right comes next.
+**What shipped today:** a switch to choose between "single option" and "spread" mode, plus the database groundwork for it — tested against a real copy of the full trade history to make sure nothing existing breaks. Then the user made a good point: since we're already in paper mode (no real money at risk), why not build and test the spread simulation now instead of waiting? Right call — so the **paper-mode spread simulation is now built and running live on the VPS**, enabled for a 1-2 week test. Every new paper trade from here uses the credit spread until this is changed.
+
+**What's still NOT built:** the real-money trading logic. The part of the system that decides whether a *real* position is open or closed needs careful, dedicated rework to handle two legs safely — that stays deferred until the paper-mode test proves itself. Nothing about today's build touches real money or the live order-execution path at all.
 """)
 
     with st.expander("Oct 12, 2026 — Got real options data for free, and it reversed two of our backtest conclusions.", expanded=False):
