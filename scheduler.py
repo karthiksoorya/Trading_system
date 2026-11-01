@@ -683,13 +683,19 @@ def monitor_open_trades():
         close_price  = None
 
         # ── 1. Index target / SL ─────────────────────────────────────────
+        # Spread mode skips the target branch: a credit spread's edge is time
+        # decay, not the index reaching a level, and both legs move together
+        # on a fast index move so closing on target hit locks in near-zero
+        # spread P&L before theta has had any time to work (see Oct 2026
+        # finding in config.py next to SPREAD_EOD_EXIT_HOUR). Stop-loss still
+        # applies — that's the zone thesis being wrong, independent of decay.
         if zone_class == "demand":
-            if ltp >= target:
+            if not is_spread and ltp >= target:
                 close_reason, close_price = "target", target
             elif ltp <= stop_loss:
                 close_reason, close_price = "stoploss", stop_loss
         else:
-            if ltp <= target:
+            if not is_spread and ltp <= target:
                 close_reason, close_price = "target", target
             elif ltp >= stop_loss:
                 close_reason, close_price = "stoploss", stop_loss
@@ -732,9 +738,8 @@ def monitor_open_trades():
         # much option-pricing-model error on too few samples to trust a
         # number. Paper-mode only until it proves itself on live-forward data.
         decay_exit_min = _s.get("DECAY_EXIT_MINUTES", 0)
-        _decay_ready = (is_spread and spread_gain_pct is not None) or (not is_spread and current_premium)
-        if (not close_reason and decay_exit_min > 0 and entry_premium > 0
-                and _decay_ready and t.get("time_signal") and t.get("date")):
+        if (not close_reason and not is_spread and decay_exit_min > 0 and entry_premium > 0
+                and current_premium and t.get("time_signal") and t.get("date")):
             decay_min_profit_pct = _s.get("DECAY_EXIT_MIN_PROFIT_PCT", 0)
             try:
                 sig_dt = datetime.strptime(f"{t['date']} {t['time_signal']}", "%Y-%m-%d %H:%M:%S")
@@ -742,15 +747,8 @@ def monitor_open_trades():
             except ValueError:
                 held_minutes = None
             if held_minutes is not None and held_minutes >= decay_exit_min:
-                if is_spread:
-                    gain_pct = spread_gain_pct
-                    short_entry = t.get("spread_short_entry_price") or 0
-                    short_current = _get_options_ltp(t.get("spread_short_symbol") or "", t)
-                    opts_pnl = ((short_entry - entry_premium) - (short_current - current_premium)) * lot_size \
-                               if short_current is not None else None
-                else:
-                    gain_pct = (current_premium - entry_premium) / entry_premium * 100
-                    opts_pnl = _calc_options_pnl(entry_premium, current_premium, lot_size)
+                gain_pct = (current_premium - entry_premium) / entry_premium * 100
+                opts_pnl = _calc_options_pnl(entry_premium, current_premium, lot_size)
                 if gain_pct < decay_min_profit_pct:
                     logger.info(
                         "DECAY EXIT #%d — held %.0fmin, premium %.2f→%.2f (%.1f%% < %.1f%% required) options P&L %s",
@@ -762,15 +760,25 @@ def monitor_open_trades():
                     closed = True
 
         # ── 5. Time exit ─────────────────────────────────────────────────
-        if not close_reason and time_exit_hr > 0 and now_hour >= time_exit_hr:
-            opts_pnl = _calc_options_pnl(entry_premium, current_premium, lot_size) \
-                       if (entry_premium > 0 and current_premium) else None
+        # Spread mode uses its own, later cutoff (SPREAD_EOD_EXIT_HOUR) instead
+        # of TIME_EXIT_HOUR / DECAY_EXIT_MINUTES above — see config.py note.
+        _exit_hr = (_s.get("SPREAD_EOD_EXIT_HOUR", config.SPREAD_EOD_EXIT_HOUR) if is_spread
+                    else time_exit_hr)
+        if not close_reason and _exit_hr > 0 and now_hour >= _exit_hr:
+            if is_spread and spread_gain_pct is not None:
+                short_entry = t.get("spread_short_entry_price") or 0
+                short_current = _get_options_ltp(t.get("spread_short_symbol") or "", t)
+                opts_pnl = ((short_entry - entry_premium) - (short_current - current_premium)) * lot_size \
+                           if short_current is not None else None
+            else:
+                opts_pnl = _calc_options_pnl(entry_premium, current_premium, lot_size) \
+                           if (entry_premium > 0 and current_premium) else None
             logger.info(
                 "TIME EXIT #%d at %02d:00 — index %.2f, options P&L %s",
-                tid, time_exit_hr, ltp,
+                tid, _exit_hr, ltp,
                 f"₹{opts_pnl:+.0f}" if opts_pnl is not None else "unknown",
             )
-            notify.time_exit(tid, time_exit_hr, opts_pnl)
+            notify.time_exit(tid, _exit_hr, opts_pnl)
             close_reason, close_price = "time_exit", ltp
             closed = True
 

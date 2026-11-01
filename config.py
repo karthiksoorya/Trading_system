@@ -116,9 +116,24 @@ OPTIONS_SL_PCT      = 7    # exit when options down 7% from entry premium (0 = d
 EXECUTION_STYLE     = "single"   # "single" | "spread"
 SPREAD_WIDTH_POINTS = 100         # spread mode only: distance between short and long strikes
 #
+# Oct 2026 paper-mode spread trades (16 trades, 100% directionally correct)
+# still netted -₹279 overall. Root cause: all 16 were weekly options 5-8 days
+# to expiry, and the index-target/decay_exit/time_exit rules were exiting them
+# in 1-41 minutes — far too little time for a week-out credit spread's theta to
+# accrue (30min is ~2% of one day's decay). Fast correct index moves on a
+# spread net close to flat because both legs move together; the spread's edge
+# only shows up once meaningful time has passed. So spread-mode positions now
+# skip the immediate index-target exit and the short DECAY_EXIT_MINUTES cutoff,
+# and instead hold until SPREAD_EOD_EXIT_HOUR - letting theta actually work
+# before being tested, instead of closing before it has a chance to. Index
+# stop-loss (zone invalidation) still applies to spreads - that's a "the
+# thesis was wrong" signal, not a decay question.
+SPREAD_EOD_EXIT_HOUR = 15    # spread trades hold until this hour (24h) regardless of DECAY_EXIT_MINUTES/TIME_EXIT_HOUR
+#
 # TIME_EXIT_HOUR: close any open trade at this hour (24h) if index target
 #   not yet hit. Prevents theta decay from eating gains in the afternoon.
-#   e.g. 13 → exit at 13:00 if still open.
+#   e.g. 13 → exit at 13:00 if still open. Single-leg mode only (see
+#   SPREAD_EOD_EXIT_HOUR above for spread mode's separate, later cutoff).
 #   Set to 0 to disable.
 TIME_EXIT_HOUR      = 13    # close at 13:00 if target not reached
 #
@@ -205,6 +220,7 @@ DAILY_OPTIONS_TARGET  = _s.get("DAILY_OPTIONS_TARGET",  DAILY_OPTIONS_TARGET)
 OPTIONS_SL_PCT        = _s.get("OPTIONS_SL_PCT",         OPTIONS_SL_PCT)
 EXECUTION_STYLE       = _s.get("EXECUTION_STYLE",        EXECUTION_STYLE)
 SPREAD_WIDTH_POINTS   = _s.get("SPREAD_WIDTH_POINTS",    SPREAD_WIDTH_POINTS)
+SPREAD_EOD_EXIT_HOUR  = _s.get("SPREAD_EOD_EXIT_HOUR",   SPREAD_EOD_EXIT_HOUR)
 MIN_BASE_CANDLES        = _s.get("MIN_BASE_CANDLES",        MIN_BASE_CANDLES)
 MIN_DEPARTURE_STRENGTH  = _s.get("MIN_DEPARTURE_STRENGTH",  MIN_DEPARTURE_STRENGTH)
 MIN_ZONE_WIDTH_ATR_MULT = _s.get("MIN_ZONE_WIDTH_ATR_MULT", MIN_ZONE_WIDTH_ATR_MULT)

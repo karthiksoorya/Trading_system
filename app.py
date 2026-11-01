@@ -550,7 +550,19 @@ with tab_engine:
                             k.prefetch_instruments()
                         except Exception:
                             pass
-                    st.success("✅ Token saved! Engine is ready to start.")
+                    # Auto-start the engine right after a valid token lands — same
+                    # guarded path as the manual button, so this never races the
+                    # 09:05 cron into a second competing process (Sep 18 incident).
+                    if is_engine_running():
+                        st.success("✅ Token saved! Engine already running — no action needed.")
+                    else:
+                        try:
+                            start_engine()
+                            st.session_state.engine_on = True
+                            st.success("✅ Token saved! Engine started automatically.")
+                        except Exception as e:
+                            st.success("✅ Token saved!")
+                            st.error(f"Auto-start failed, start manually below: {e}")
                     st.balloons()
                 except Exception as e:
                     import traceback
