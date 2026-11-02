@@ -511,19 +511,70 @@ with tab_engine:
     # Step 2: Paste token
     st.markdown("**Step 2 — Paste the token**")
 
-    # Auto-capture: if Kite redirected back to THIS app, request_token is in the URL params
+    def _save_token_and_start(token: str):
+        """Exchange token with Kite, prefetch instruments, auto-start the engine.
+        Shared by both the manual 'Save Token' click and the fully-automatic
+        redirect-capture path below, so the two never drift apart."""
+        if not token:
+            st.error("Could not read token. Paste the full URL or the token value.")
+            return
+        if not config.KITE_API_SECRET:
+            st.error("KITE_API_SECRET is missing in .env — cannot complete token exchange.")
+            return
+        try:
+            with st.spinner("Exchanging token with Kite..."):
+                k.generate_session(token)
+            with st.spinner("Pre-loading instruments (makes first trade instant)..."):
+                try:
+                    k.prefetch_instruments()
+                except Exception:
+                    pass
+            # Auto-start the engine right after a valid token lands — same
+            # guarded path as the manual button, so this never races the
+            # 09:05 cron into a second competing process (Sep 18 incident).
+            if is_engine_running():
+                st.success("✅ Token saved! Engine already running — no action needed.")
+            else:
+                try:
+                    start_engine()
+                    st.session_state.engine_on = True
+                    st.success("✅ Token saved! Engine started automatically.")
+                except Exception as e:
+                    st.success("✅ Token saved!")
+                    st.error(f"Auto-start failed, start manually below: {e}")
+            st.balloons()
+        except Exception as e:
+            import traceback
+            st.error(f"**{type(e).__name__}**: {e}")
+            st.code(traceback.format_exc())
+
+    # Auto-capture: if Kite's registered Redirect URL points back to THIS app,
+    # request_token lands in the URL query params on redirect — exchange it
+    # immediately with no manual paste/click needed at all. Guarded by a
+    # session_state flag so it only fires once per redirect, not on every
+    # later rerun of the page. Requires the Redirect URL on developer.kite.trade
+    # to be set to this dashboard's actual reachable URL (not localhost) —
+    # see the caption below if it's still showing "Site can't be reached".
     _auto_token = ""
     try:
         _qp = st.query_params
         if "request_token" in _qp:
             _auto_token = _qp["request_token"]
             st.query_params.clear()   # remove from address bar
-            st.info(f"✅ Token auto-captured from redirect URL.")
+            if not st.session_state.get("_auto_token_handled") == _auto_token:
+                st.session_state["_auto_token_handled"] = _auto_token
+                st.info("✅ Token auto-captured from redirect — exchanging automatically, no click needed.")
+                _save_token_and_start(_extract_token(_auto_token))
     except Exception:
         pass
 
     if not _auto_token:
-        st.caption("Copy the full URL from the address bar and paste below (or just the token value after `request_token=`).")
+        st.caption(
+            "Copy the full URL from the address bar and paste below (or just the token value after "
+            "`request_token=`). To skip this step entirely, set the Redirect URL in your Kite Connect "
+            "app (developer.kite.trade) to this dashboard's address — then login → token → engine start "
+            "all happen automatically on redirect."
+        )
 
     # Pre-flight: warn if API secret is missing
     if not config.KITE_API_SECRET:
@@ -536,38 +587,7 @@ with tab_engine:
             placeholder="http://127.0.0.1/?request_token=XXXXXX  OR  just XXXXXX",
         )
         if st.form_submit_button("💾 Save Token", type="primary", use_container_width=True):
-            token = _extract_token(raw_url)
-            if not token:
-                st.error("Could not read token. Paste the full URL or the token value.")
-            elif not config.KITE_API_SECRET:
-                st.error("KITE_API_SECRET is missing in .env — cannot complete token exchange.")
-            else:
-                try:
-                    with st.spinner("Exchanging token with Kite..."):
-                        k.generate_session(token)
-                    with st.spinner("Pre-loading instruments (makes first trade instant)..."):
-                        try:
-                            k.prefetch_instruments()
-                        except Exception:
-                            pass
-                    # Auto-start the engine right after a valid token lands — same
-                    # guarded path as the manual button, so this never races the
-                    # 09:05 cron into a second competing process (Sep 18 incident).
-                    if is_engine_running():
-                        st.success("✅ Token saved! Engine already running — no action needed.")
-                    else:
-                        try:
-                            start_engine()
-                            st.session_state.engine_on = True
-                            st.success("✅ Token saved! Engine started automatically.")
-                        except Exception as e:
-                            st.success("✅ Token saved!")
-                            st.error(f"Auto-start failed, start manually below: {e}")
-                    st.balloons()
-                except Exception as e:
-                    import traceback
-                    st.error(f"**{type(e).__name__}**: {e}")
-                    st.code(traceback.format_exc())
+            _save_token_and_start(_extract_token(raw_url))
 
     st.divider()
 
