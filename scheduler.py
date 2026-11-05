@@ -668,6 +668,8 @@ def monitor_open_trades():
         # project already learned from. Index stop/target, decay-exit, and
         # time-exit still protect a spread position same as a single one.
         spread_gain_pct = None
+        entry_credit    = None
+        current_debit   = None
         if is_spread:
             short_sym = t.get("spread_short_symbol") or ""
             short_entry = t.get("spread_short_entry_price") or 0
@@ -699,6 +701,35 @@ def monitor_open_trades():
                 close_reason, close_price = "target", target
             elif ltp >= stop_loss:
                 close_reason, close_price = "stoploss", stop_loss
+
+        # ── 1b. Spread profit target / spread-native stop-loss ─────────────
+        # Nov 5 2026 web research on real credit-spread practice: close early
+        # at 50-80% of max credit captured rather than always riding to the
+        # EOD cutoff, and use a cost-to-close-vs-credit-received ratio as the
+        # spread's own stop-loss instead of leaving it with no premium-based
+        # protection at all (the OPTIONS_SL_PCT/TRAIL_PCT above were validated
+        # for a single purchased premium, not a spread, so they're still
+        # skipped for spreads — this is the spread-native equivalent).
+        if not close_reason and is_spread and entry_credit and spread_gain_pct is not None:
+            profit_target_pct = _s.get("SPREAD_PROFIT_TARGET_PCT", config.SPREAD_PROFIT_TARGET_PCT)
+            if profit_target_pct > 0 and spread_gain_pct >= profit_target_pct:
+                opts_pnl = (entry_credit - current_debit) * lot_size
+                logger.info(
+                    "SPREAD PROFIT TARGET #%d — captured %.1f%% of credit (>= %.0f%% target) options P&L ₹%.0f",
+                    tid, spread_gain_pct, profit_target_pct, opts_pnl,
+                )
+                close_reason, close_price = "spread_profit_target", ltp
+                closed = True
+            else:
+                sl_ratio = _s.get("SPREAD_SL_DEBIT_RATIO", config.SPREAD_SL_DEBIT_RATIO)
+                if sl_ratio > 0 and current_debit > entry_credit * sl_ratio:
+                    opts_pnl = (entry_credit - current_debit) * lot_size
+                    logger.info(
+                        "SPREAD SL #%d — cost to close %.2f is %.2fx entry credit %.2f (>= %.2fx limit) options P&L ₹%.0f",
+                        tid, current_debit, current_debit / entry_credit, entry_credit, sl_ratio, opts_pnl,
+                    )
+                    close_reason, close_price = "spread_sl", ltp
+                    closed = True
 
         # ── 2. Options trailing profit lock (single-leg only, see note above) ──
         if not close_reason and not is_spread and trail_pct > 0 and entry_premium > 0 and current_premium:

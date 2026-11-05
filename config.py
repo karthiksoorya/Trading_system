@@ -130,6 +130,14 @@ SPREAD_WIDTH_POINTS = 100         # spread mode only: distance between short and
 # thesis was wrong" signal, not a decay question.
 SPREAD_EOD_EXIT_HOUR = 15    # spread trades hold until this hour (24h) regardless of DECAY_EXIT_MINUTES/TIME_EXIT_HOUR
 #
+# Nov 5 2026: web research on real credit-spread practice (SahI, BankNiftyOptions,
+# Strike.money) consistently uses a profit-target exit rather than pure time, plus
+# a cost-to-close-vs-credit ratio as the spread's own stop-loss. Sources are trading
+# blogs, not rigorous studies — treat these defaults as a starting point to validate
+# in paper mode, not an established optimum.
+SPREAD_PROFIT_TARGET_PCT = 60     # close early once this % of max credit is captured (0 = disabled)
+SPREAD_SL_DEBIT_RATIO    = 1.75   # close if cost-to-close exceeds this multiple of entry credit (0 = disabled)
+#
 # TIME_EXIT_HOUR: close any open trade at this hour (24h) if index target
 #   not yet hit. Prevents theta decay from eating gains in the afternoon.
 #   e.g. 13 → exit at 13:00 if still open. Single-leg mode only (see
@@ -221,6 +229,8 @@ OPTIONS_SL_PCT        = _s.get("OPTIONS_SL_PCT",         OPTIONS_SL_PCT)
 EXECUTION_STYLE       = _s.get("EXECUTION_STYLE",        EXECUTION_STYLE)
 SPREAD_WIDTH_POINTS   = _s.get("SPREAD_WIDTH_POINTS",    SPREAD_WIDTH_POINTS)
 SPREAD_EOD_EXIT_HOUR  = _s.get("SPREAD_EOD_EXIT_HOUR",   SPREAD_EOD_EXIT_HOUR)
+SPREAD_PROFIT_TARGET_PCT = _s.get("SPREAD_PROFIT_TARGET_PCT", SPREAD_PROFIT_TARGET_PCT)
+SPREAD_SL_DEBIT_RATIO    = _s.get("SPREAD_SL_DEBIT_RATIO",    SPREAD_SL_DEBIT_RATIO)
 MIN_BASE_CANDLES        = _s.get("MIN_BASE_CANDLES",        MIN_BASE_CANDLES)
 MIN_DEPARTURE_STRENGTH  = _s.get("MIN_DEPARTURE_STRENGTH",  MIN_DEPARTURE_STRENGTH)
 MIN_ZONE_WIDTH_ATR_MULT = _s.get("MIN_ZONE_WIDTH_ATR_MULT", MIN_ZONE_WIDTH_ATR_MULT)
