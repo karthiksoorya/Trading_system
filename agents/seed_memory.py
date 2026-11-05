@@ -229,11 +229,12 @@ def _aggregate(trades: list[dict]) -> dict:
 # ── Read knowledge ────────────────────────────────────────────────────────────
 
 def _load_knowledge() -> str:
+    # No truncation: the 4000-char cap this used to have only ever fed the
+    # synthesis the OLDEST content, since AGENT_KNOWLEDGE.md is append-only
+    # and the newest, most relevant dated entries live at the end. Removed
+    # Nov 5 2026 - the full file comfortably fits Claude Sonnet's context.
     if _KNOWLEDGE.exists():
-        text = _KNOWLEDGE.read_text(encoding="utf-8")
-        if len(text) > 4000:
-            text = text[:4000] + "\n...[truncated]"
-        return text
+        return _KNOWLEDGE.read_text(encoding="utf-8")
     return "(AGENT_KNOWLEDGE.md not found — skipping)"
 
 
